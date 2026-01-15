@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Azure.Core;
 
-namespace LazyAzureKeyVault.Services;
+namespace LazyKeyVault.Services;
 
 /// <summary>
 /// A TokenCredential that gets access tokens from Azure CLI.

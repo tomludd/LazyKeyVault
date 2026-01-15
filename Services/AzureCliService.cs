@@ -5,9 +5,9 @@ using System.Collections.Concurrent;
 using Azure.ResourceManager;
 using Azure.ResourceManager.KeyVault;
 using Azure.Security.KeyVault.Secrets;
-using LazyAzureKeyVault.Models;
+using LazyKeyVault.Models;
 
-namespace LazyAzureKeyVault.Services;
+namespace LazyKeyVault.Services;
 
 public class AzureCliService
 {

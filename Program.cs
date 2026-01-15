@@ -1,7 +1,7 @@
 ﻿using Terminal.Gui;
-using LazyAzureKeyVault.Views;
+using LazyKeyVault.Views;
 
-namespace LazyAzureKeyVault;
+namespace LazyKeyVault;
 
 class Program
 {

@@ -1,4 +1,4 @@
-namespace LazyAzureKeyVault.Models;
+namespace LazyKeyVault.Models;
 
 public record KeyVault(
     string Id = "",

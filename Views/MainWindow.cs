@@ -1,9 +1,9 @@
 using Terminal.Gui;
-using LazyAzureKeyVault.Models;
-using LazyAzureKeyVault.Services;
+using LazyKeyVault.Models;
+using LazyKeyVault.Services;
 using System.Collections.ObjectModel;
 
-namespace LazyAzureKeyVault.Views;
+namespace LazyKeyVault.Views;
 
 public class MainWindow : Window
 {

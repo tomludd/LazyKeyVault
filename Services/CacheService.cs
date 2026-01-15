@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace LazyAzureKeyVault.Services;
+namespace LazyKeyVault.Services;
 
 /// <summary>
 /// Thread-safe in-memory cache with TTL support.

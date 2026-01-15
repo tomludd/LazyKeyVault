@@ -2,25 +2,25 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>lkv</AssemblyName>
-    <RootNamespace>LazyAzureKeyVault</RootNamespace>
+    <AssemblyName>LazyKeyVault</AssemblyName>
+    <RootNamespace>LazyKeyVault</RootNamespace>
     <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>false</SelfContained>
+    <SelfContained>true</SelfContained>
 
     <!-- NuGet Tool Package Settings -->
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>lazykeyvault</ToolCommandName>
-    <PackageId>LazyAzureKeyVault</PackageId>
+    <PackageId>LazyKeyVault</PackageId>
     <Version>1.0.0</Version>
     <Authors>YourName</Authors>
     <Description>A LazyGit-style terminal UI for managing Azure Key Vault secrets. Browse accounts, subscriptions, and vaults with an intuitive TUI.</Description>
     <PackageTags>azure;keyvault;secrets;tui;terminal;cli;lazygit</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/YourUsername/LazyAzureKeyVault</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/YourUsername/LazyAzureKeyVault</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/tomludd/LazyKeyVault</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/tomludd/LazyKeyVault</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 

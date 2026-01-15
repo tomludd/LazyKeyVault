@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace LazyAzureKeyVault.Models;
+namespace LazyKeyVault.Models;
 
 public record KeyVaultSecret(
     string Id = "",

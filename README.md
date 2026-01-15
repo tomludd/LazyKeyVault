@@ -1,10 +1,10 @@
-# LazyAzureKeyVault
+# LazyKeyVault
 
 A terminal UI for Azure Key Vault secrets management, inspired by [LazyDocker](https://github.com/jesseduffield/lazydocker) and [LazyGit](https://github.com/jesseduffield/lazygit).
 
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)
 ![Terminal.Gui](https://img.shields.io/badge/Terminal.Gui-2.0-blue)
-[![NuGet](https://img.shields.io/nuget/v/LazyAzureKeyVault.svg)](https://www.nuget.org/packages/LazyAzureKeyVault/)
+[![NuGet](https://img.shields.io/nuget/v/LazyKeyVault.svg)](https://www.nuget.org/packages/LazyKeyVault/)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Features
@@ -27,7 +27,7 @@ A terminal UI for Azure Key Vault secrets management, inspired by [LazyDocker](h
 ### Install as .NET Tool from NuGet
 
 ```bash
-dotnet tool install --global LazyAzureKeyVault
+dotnet tool install --global LazyKeyVault
 ```
 
 Then run:
@@ -39,12 +39,12 @@ lazykeyvault
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/LazyAzureKeyVault.git
-cd LazyAzureKeyVault
+git clone https://github.com/tomludd/LazyKeyVault.git
+cd LazyKeyVault
 
 # Pack and install globally
 dotnet pack -c Release -o ./nupkg
-dotnet tool install -g --add-source ./nupkg LazyAzureKeyVault
+dotnet tool install -g --add-source ./nupkg LazyKeyVault
 ```
 
 Then run:
@@ -55,15 +55,15 @@ lazykeyvault
 ### Update Local Installation
 
 ```bash
-dotnet tool uninstall -g LazyAzureKeyVault
+dotnet tool uninstall -g LazyKeyVault
 dotnet pack -c Release -o ./nupkg
-dotnet tool install -g --add-source ./nupkg LazyAzureKeyVault
+dotnet tool install -g --add-source ./nupkg LazyKeyVault
 ```
 
 ### Run without Installing
 
 ```bash
-cd LazyAzureKeyVault
+cd LazyKeyVault
 dotnet run
 ```
 

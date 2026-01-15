@@ -1,4 +1,4 @@
-namespace LazyAzureKeyVault.Services;
+namespace LazyKeyVault.Services;
 
 /// <summary>
 /// Manages secret value visibility with auto-hide after timeout.

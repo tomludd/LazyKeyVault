@@ -2,7 +2,7 @@ using Terminal.Gui;
 using System.Collections;
 using System.Collections.Specialized;
 
-namespace LazyAzureKeyVault.Views;
+namespace LazyKeyVault.Views;
 
 /// <summary>
 /// Represents a list item with optional color.
