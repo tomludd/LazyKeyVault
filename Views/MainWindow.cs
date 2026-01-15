@@ -421,6 +421,24 @@ public class MainWindow : Window
         if (e.Item < 0 || e.Item >= _keyVaults.Count) return;
         _selectedVault = _keyVaults[e.Item];
 
+        // Check if already cached - if so, skip loading indicator
+        if (_azureService.AreSecretsCached(_selectedVault.Name))
+        {
+            _secrets = (await _azureService.GetSecretsAsync(_selectedVault.Name))
+                .OrderBy(s => s.Name)
+                .ToList();
+
+            Application.Invoke(() =>
+            {
+                _secretsSource.Clear();
+                ClearSecretDetails();
+                _filteredSecrets = [.. _secrets];
+                FilterSecrets();
+                SetStatus($"Found {_secrets.Count} secrets (cached)");
+            });
+            return;
+        }
+
         Application.Invoke(() => { _secretsLoading.Visible = true; _secretsSource.Clear(); ClearSecretDetails(); });
         SetStatus($"Loading secrets from {_selectedVault.Name}...");
 

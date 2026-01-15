@@ -170,6 +170,10 @@ public class AzureCliService
     public bool AreVaultsCached(string subscriptionId) => 
         _cache.TryGet<List<KeyVault>>($"vaults:{subscriptionId}", out _);
 
+    /// <summary>Checks if secrets for a vault are cached.</summary>
+    public bool AreSecretsCached(string vaultName) =>
+        _cache.TryGet<List<Models.KeyVaultSecret>>($"secrets:{vaultName}", out _);
+
     /// <summary>Checks if a secret value is cached and returns it.</summary>
     public string? GetCachedSecretValue(string vaultName, string secretName)
     {
