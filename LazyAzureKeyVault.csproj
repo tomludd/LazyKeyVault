@@ -1,0 +1,38 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>lkv</AssemblyName>
+    <RootNamespace>LazyAzureKeyVault</RootNamespace>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+
+    <!-- NuGet Tool Package Settings -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>lazykeyvault</ToolCommandName>
+    <PackageId>LazyAzureKeyVault</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>YourName</Authors>
+    <Description>A LazyGit-style terminal UI for managing Azure Key Vault secrets. Browse accounts, subscriptions, and vaults with an intuitive TUI.</Description>
+    <PackageTags>azure;keyvault;secrets;tui;terminal;cli;lazygit</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/YourUsername/LazyAzureKeyVault</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/YourUsername/LazyAzureKeyVault</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.ResourceManager.KeyVault" Version="1.*" />
+    <PackageReference Include="Azure.Security.KeyVault.Secrets" Version="4.*" />
+    <PackageReference Include="Terminal.Gui" Version="2.*" />
+    <PackageReference Include="TextCopy" Version="6.2.1" />
+  </ItemGroup>
+
+</Project>
