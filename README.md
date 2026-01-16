@@ -126,7 +126,7 @@ lazykeyvault
 
 ## Tech Stack
 
-- **.NET 8.0** - Cross-platform runtime
+- **.NET 10.0** - Cross-platform runtime
 - **[Terminal.Gui v2](https://github.com/gui-cs/Terminal.Gui)** - TUI framework
 - **Azure SDK** - Key Vault operations (secrets, vault listing)
 - **Azure CLI** - Authentication via `az login`
