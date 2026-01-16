@@ -7,8 +7,6 @@
     <Nullable>enable</Nullable>
     <AssemblyName>LazyKeyVault</AssemblyName>
     <RootNamespace>LazyKeyVault</RootNamespace>
-    <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>true</SelfContained>
 
     <!-- NuGet Tool Package Settings -->
     <PackAsTool>true</PackAsTool>

@@ -50,16 +50,10 @@ jobs:
       with:
         dotnet-version: '10.0.x'
         
-    - name: Restore dependencies
-      run: dotnet restore
-      
-    - name: Build
-      run: dotnet build -c Release --no-restore
-      
     - name: Pack
       run: |
         RELEASE_NOTES="${{ steps.release_notes.outputs.NOTES }}"
-        dotnet pack -c Release --no-build -o ./nupkg \
+        dotnet pack -c Release -o ./nupkg \
           /p:PackageVersion=${{ steps.get_version.outputs.VERSION }} \
           /p:PackageReleaseNotes="$RELEASE_NOTES"
       
