@@ -15,17 +15,22 @@
     <ToolCommandName>lazykeyvault</ToolCommandName>
     <PackageId>LazyKeyVault</PackageId>
     <Version>1.0.0</Version>
-    <Authors>YourName</Authors>
+    <Authors>tomludd</Authors>
+    <Company>LazyKeyVault Contributors</Company>
+    <Product>LazyKeyVault</Product>
     <Description>A LazyGit-style terminal UI for managing Azure Key Vault secrets. Browse accounts, subscriptions, and vaults with an intuitive TUI.</Description>
-    <PackageTags>azure;keyvault;secrets;tui;terminal;cli;lazygit</PackageTags>
+    <PackageTags>azure;keyvault;secrets;tui;terminal;cli;lazygit;terminal-ui</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/tomludd/LazyKeyVault</PackageProjectUrl>
     <RepositoryUrl>https://github.com/tomludd/LazyKeyVault</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Copyright>Copyright (c) 2025 LazyKeyVault Contributors</Copyright>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>

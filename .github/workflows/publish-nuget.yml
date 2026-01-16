@@ -1,0 +1,79 @@
+name: Publish to NuGet and GitHub Releases
+
+on:
+  push:
+    tags:
+      - 'release/*.*.*'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+      
+    - name: Extract version from tag
+      id: get_version
+      run: |
+        TAG_NAME=${GITHUB_REF#refs/tags/release/}
+        echo "VERSION=$TAG_NAME" >> $GITHUB_OUTPUT
+        echo "Extracted version: $TAG_NAME"
+    
+    - name: Generate release notes from commits
+      id: release_notes
+      run: |
+        # Get the previous tag
+        PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+        
+        if [ -z "$PREV_TAG" ]; then
+          # First release - get all commits
+          NOTES=$(git log --pretty=format:"- %s (%h)" --no-merges)
+        else
+          # Get commits since previous tag
+          NOTES=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+        fi
+        
+        # Escape for JSON and create multi-line output
+        NOTES="${NOTES//'%'/'%25'}"
+        NOTES="${NOTES//$'\n'/'%0A'}"
+        NOTES="${NOTES//$'\r'/'%0D'}"
+        echo "NOTES=$NOTES" >> $GITHUB_OUTPUT
+      
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+        
+    - name: Restore dependencies
+      run: dotnet restore
+      
+    - name: Build
+      run: dotnet build -c Release --no-restore
+      
+    - name: Pack
+      run: |
+        RELEASE_NOTES="${{ steps.release_notes.outputs.NOTES }}"
+        dotnet pack -c Release --no-build -o ./nupkg \
+          /p:PackageVersion=${{ steps.get_version.outputs.VERSION }} \
+          /p:PackageReleaseNotes="$RELEASE_NOTES"
+      
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ./nupkg/*.nupkg
+        generate_release_notes: true
+        tag_name: release/${{ steps.get_version.outputs.VERSION }}
+        name: Release ${{ steps.get_version.outputs.VERSION }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+    - name: Push to NuGet
+      run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_PUSH_APIKEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+

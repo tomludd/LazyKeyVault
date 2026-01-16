@@ -1,6 +1,6 @@
 # Agents
 
-This document describes the AI agents and tools used in the development of LazyAzureKeyVault.
+This document describes the AI agents and tools used in the development of LazyKeyVault.
 
 ## Development Agents
 
