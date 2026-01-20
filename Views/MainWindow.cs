@@ -173,10 +173,25 @@ public class MainWindow : Window
 
     private async Task RefreshDataAsync(bool force = false)
     {
+        // Save current selections
+        var savedAccountIndex = _accountsList.SelectedItem;
+        var savedSubscriptionIndex = _subscriptionsList.SelectedItem;
+        var savedVaultIndex = _vaultsList.SelectedItem;
+        var savedSecretIndex = _secretsList.SelectedItem;
+
         if (force) _azureService.ClearCache();
 
-        Application.Invoke(() => { _accountsLoading.Visible = true; _accountsSource.Clear(); });
-        SetStatus("Loading accounts...");
+        // Clear all UI
+        Application.Invoke(() => 
+        { 
+            _accountsLoading.Visible = true; 
+            _accountsSource.Clear();
+            _subscriptionsSource.Clear();
+            _vaultsSource.Clear();
+            _secretsSource.Clear();
+            ClearSecretDetails();
+        });
+        SetStatus("Refreshing all data...");
 
         _accounts = await _azureService.GetAccountsAsync();
 
@@ -188,8 +203,162 @@ public class MainWindow : Window
             _accountsLoading.Visible = false;
             _accountsSource.Clear();
             foreach (var acc in uniqueUsers) _accountsSource.Add(EscapeHotkey(acc.User?.Name ?? acc.TenantId));
-            if (uniqueUsers.Count > 0) _accountsList.SelectedItem = 0;
-            SetStatus($"Loaded {uniqueUsers.Count} accounts");
+            SetStatus($"Refreshed {uniqueUsers.Count} accounts");
+        });
+
+        // Restore account selection and cascade reload
+        if (savedAccountIndex >= 0 && savedAccountIndex < uniqueUsers.Count)
+        {
+            await RestoreSelectionsAsync(savedAccountIndex, savedSubscriptionIndex, savedVaultIndex, savedSecretIndex);
+        }
+        else if (uniqueUsers.Count > 0)
+        {
+            // Default to first account if previous selection invalid
+            await RestoreSelectionsAsync(0, -1, -1, -1);
+        }
+    }
+
+    private async Task RestoreSelectionsAsync(int accountIndex, int subscriptionIndex, int vaultIndex, int secretIndex)
+    {
+        // Manually trigger account selection to load subscriptions
+        var uniqueUsers = _accounts.GroupBy(a => a.User?.Name ?? a.TenantId).Select(g => g.First()).ToList();
+        if (accountIndex < 0 || accountIndex >= uniqueUsers.Count) return;
+
+        _selectedAccount = uniqueUsers[accountIndex];
+        var userName = _selectedAccount.User?.Name ?? _selectedAccount.TenantId;
+
+        Application.Invoke(() => 
+        { 
+            _accountsList.SelectedItem = accountIndex;
+            _subscriptionsLoading.Visible = true; 
+            _subscriptionsSource.Clear(); 
+            ClearVaultsAndSecrets(); 
+        });
+
+        // Load subscriptions for selected account
+        var userSubscriptions = _accounts
+            .Where(a => (a.User?.Name ?? a.TenantId) == userName)
+            .OrderBy(a => a.Name)
+            .ToList();
+
+        var grouped = userSubscriptions
+            .GroupBy(s => GetSubscriptionBaseName(s.Name))
+            .OrderBy(g => g.Key)
+            .ToList();
+
+        Application.Invoke(() =>
+        {
+            _subscriptionsLoading.Visible = false;
+            _subscriptionsSource.Clear();
+            var flatList = new List<AzureAccount?>();
+            _groupSubscriptions = [];
+            
+            foreach (var group in grouped)
+            {
+                if (group.Count() > 1)
+                {
+                    var headerIndex = flatList.Count;
+                    _subscriptionsSource.Add($"{EscapeHotkey(group.Key)}:", GroupColor);
+                    flatList.Add(null);
+                    _groupSubscriptions[headerIndex] = group.OrderBy(s => s.Name).ToList();
+                    foreach (var sub in group.OrderBy(s => s.Name))
+                    {
+                        _subscriptionsSource.Add($"  {EscapeHotkey(sub.Name)}", GetNameColor(sub.Name));
+                        flatList.Add(sub);
+                    }
+                }
+                else
+                {
+                    var sub = group.First();
+                    _subscriptionsSource.Add(EscapeHotkey(sub.Name), GetNameColor(sub.Name));
+                    flatList.Add(sub);
+                }
+            }
+            _subscriptions = flatList;
+        });
+
+        // Start background vault loading
+        _ = LoadVaultsAsync(userSubscriptions);
+
+        // Restore subscription selection
+        if (subscriptionIndex >= 0 && subscriptionIndex < _subscriptions.Count)
+        {
+            Application.Invoke(() => _subscriptionsList.SelectedItem = subscriptionIndex);
+            await LoadVaultsForSubscriptionAsync(subscriptionIndex);
+
+            // Restore vault selection
+            if (vaultIndex >= 0 && vaultIndex < _keyVaults.Count)
+            {
+                Application.Invoke(() => _vaultsList.SelectedItem = vaultIndex);
+                _selectedVault = _keyVaults[vaultIndex];
+                await LoadSecretsForVaultAsync(_selectedVault);
+
+                // Restore secret selection
+                if (secretIndex >= 0 && secretIndex < _filteredSecrets.Count)
+                {
+                    Application.Invoke(() => _secretsList.SelectedItem = secretIndex);
+                }
+            }
+        }
+        else if (_subscriptions.Count > 0)
+        {
+            // Default to first subscription
+            var firstSubIndex = _subscriptions.FindIndex(s => s != null);
+            if (firstSubIndex >= 0)
+            {
+                Application.Invoke(() => _subscriptionsList.SelectedItem = firstSubIndex);
+                await LoadVaultsForSubscriptionAsync(firstSubIndex);
+            }
+        }
+    }
+
+    private async Task LoadSecretsForVaultAsync(KeyVault vault)
+    {
+        if (_azureService.AreSecretsCached(vault.Name))
+        {
+            _secrets = (await _azureService.GetSecretsAsync(vault.Name))
+                .OrderBy(s => s.Name)
+                .ToList();
+
+            Application.Invoke(() =>
+            {
+                if (_selectedVault?.Name == vault.Name)
+                {
+                    _secretsSource.Clear();
+                    ClearSecretDetails();
+                    _filteredSecrets = [.. _secrets];
+                    FilterSecrets();
+                    SetStatus($"Found {_secrets.Count} secrets (cached)");
+                }
+            });
+            return;
+        }
+
+        Application.Invoke(() => { _secretsLoading.Visible = true; _secretsSource.Clear(); ClearSecretDetails(); });
+        SetStatus($"Loading secrets from {vault.Name}...");
+
+        if (!string.IsNullOrEmpty(vault.SubscriptionId))
+        {
+            await _azureService.SetSubscriptionAsync(vault.SubscriptionId);
+        }
+
+        _secrets = (await _azureService.GetSecretsAsync(vault.Name))
+            .OrderBy(s => s.Name)
+            .ToList();
+
+        Application.Invoke(() =>
+        {
+            if (_selectedVault?.Name == vault.Name)
+            {
+                _secretsLoading.Visible = false;
+                _filteredSecrets = [.. _secrets];
+                FilterSecrets();
+                SetStatus($"Found {_secrets.Count} secrets");
+            }
+            else
+            {
+                _secretsLoading.Visible = false;
+            }
         });
     }
 
@@ -259,6 +428,26 @@ public class MainWindow : Window
                 }
             }
             else SetStatus($"Found 0 subscriptions");
+        });
+
+        // Load vaults for all subscriptions in the background
+        _ = LoadVaultsAsync(userSubscriptions);
+    }
+
+    private async Task LoadVaultsAsync(List<AzureAccount> subscriptions)
+    {
+        var subIds = subscriptions.Select(s => s.Id).ToList();
+        
+        // Load vaults in background without updating UI - only cache them
+        // The UI will be updated when user selects a subscription
+        await _azureService.LoadVaultsAsync(subIds, (completed, total, currentSub) =>
+        {
+            // Update status only if not showing subscription-specific info
+            if (_selectedSubscription == null || !_azureService.AreVaultsCached(_selectedSubscription.Id))
+            {
+                var subName = subscriptions.FirstOrDefault(s => s.Id == currentSub)?.Name ?? currentSub;
+                Application.Invoke(() => SetStatus($"Loading vaults ({completed}/{total}): {subName.Substring(0, Math.Min(30, subName.Length))}..."));
+            }
         });
     }
 
@@ -358,21 +547,26 @@ public class MainWindow : Window
         }
         
         if (sub == null) return;
-        _selectedSubscription = sub;
 
         // Check if already cached - if so, skip loading indicator
         if (_azureService.AreVaultsCached(sub.Id))
         {
-            _keyVaults = (await _azureService.GetKeyVaultsAsync(sub.Id))
+            var vaults = (await _azureService.GetKeyVaultsAsync(sub.Id))
                 .OrderBy(v => v.Name)
                 .ToList();
 
             Application.Invoke(() =>
             {
-                _vaultsSource.Clear();
-                ClearSecrets();
-                foreach (var v in _keyVaults) _vaultsSource.Add(EscapeHotkey(v.Name), GetNameColor(v.Name));
-                SetStatus($"Found {_keyVaults.Count} key vaults (cached)");
+                // Only update UI if this subscription index is still selected
+                if (_subscriptionsList.SelectedItem == index)
+                {
+                    _selectedSubscription = sub;
+                    _keyVaults = vaults;
+                    _vaultsSource.Clear();
+                    ClearSecrets();
+                    foreach (var v in _keyVaults) _vaultsSource.Add(EscapeHotkey(v.Name), GetNameColor(v.Name));
+                    SetStatus($"Found {_keyVaults.Count} key vaults (cached)");
+                }
             });
             return;
         }
@@ -381,16 +575,26 @@ public class MainWindow : Window
         SetStatus($"Loading vaults for {sub.Name}...");
 
         await _azureService.SetSubscriptionAsync(sub.Id);
-        _keyVaults = (await _azureService.GetKeyVaultsAsync(sub.Id))
+        var loadedVaults = (await _azureService.GetKeyVaultsAsync(sub.Id))
             .OrderBy(v => v.Name)
             .ToList();
 
         Application.Invoke(() =>
         {
-            _vaultsLoading.Visible = false;
-            _vaultsSource.Clear();
-            foreach (var v in _keyVaults) _vaultsSource.Add(EscapeHotkey(v.Name), GetNameColor(v.Name));
-            SetStatus($"Found {_keyVaults.Count} key vaults");
+            // Only update UI if this subscription index is still selected
+            if (_subscriptionsList.SelectedItem == index)
+            {
+                _selectedSubscription = sub;
+                _keyVaults = loadedVaults;
+                _vaultsLoading.Visible = false;
+                _vaultsSource.Clear();
+                foreach (var v in _keyVaults) _vaultsSource.Add(EscapeHotkey(v.Name), GetNameColor(v.Name));
+                SetStatus($"Found {_keyVaults.Count} key vaults");
+            }
+            else
+            {
+                _vaultsLoading.Visible = false;
+            }
         });
     }
 
@@ -419,45 +623,61 @@ public class MainWindow : Window
     private async void OnVaultSelected(object? sender, ListViewItemEventArgs e)
     {
         if (e.Item < 0 || e.Item >= _keyVaults.Count) return;
-        _selectedVault = _keyVaults[e.Item];
+        var vault = _keyVaults[e.Item];
 
         // Check if already cached - if so, skip loading indicator
-        if (_azureService.AreSecretsCached(_selectedVault.Name))
+        if (_azureService.AreSecretsCached(vault.Name))
         {
-            _secrets = (await _azureService.GetSecretsAsync(_selectedVault.Name))
+            var secrets = (await _azureService.GetSecretsAsync(vault.Name))
                 .OrderBy(s => s.Name)
                 .ToList();
 
             Application.Invoke(() =>
             {
-                _secretsSource.Clear();
-                ClearSecretDetails();
-                _filteredSecrets = [.. _secrets];
-                FilterSecrets();
-                SetStatus($"Found {_secrets.Count} secrets (cached)");
+                // Only update UI if this vault index is still selected
+                if (_vaultsList.SelectedItem == e.Item && e.Item < _keyVaults.Count && _keyVaults[e.Item].Name == vault.Name)
+                {
+                    _selectedVault = vault;
+                    _secrets = secrets;
+                    _secretsSource.Clear();
+                    ClearSecretDetails();
+                    _filteredSecrets = [.. _secrets];
+                    FilterSecrets();
+                    SetStatus($"Found {_secrets.Count} secrets (cached)");
+                }
             });
             return;
         }
 
         Application.Invoke(() => { _secretsLoading.Visible = true; _secretsSource.Clear(); ClearSecretDetails(); });
-        SetStatus($"Loading secrets from {_selectedVault.Name}...");
+        SetStatus($"Loading secrets from {vault.Name}...");
 
         // Ensure subscription context is set for this vault
-        if (!string.IsNullOrEmpty(_selectedVault.SubscriptionId))
+        if (!string.IsNullOrEmpty(vault.SubscriptionId))
         {
-            await _azureService.SetSubscriptionAsync(_selectedVault.SubscriptionId);
+            await _azureService.SetSubscriptionAsync(vault.SubscriptionId);
         }
 
-        _secrets = (await _azureService.GetSecretsAsync(_selectedVault.Name))
+        var loadedSecrets = (await _azureService.GetSecretsAsync(vault.Name))
             .OrderBy(s => s.Name)
             .ToList();
 
         Application.Invoke(() =>
         {
-            _secretsLoading.Visible = false;
-            _filteredSecrets = [.. _secrets];
-            FilterSecrets();
-            SetStatus($"Found {_secrets.Count} secrets");
+            // Only update UI if this vault index is still selected
+            if (_vaultsList.SelectedItem == e.Item && e.Item < _keyVaults.Count && _keyVaults[e.Item].Name == vault.Name)
+            {
+                _selectedVault = vault;
+                _secrets = loadedSecrets;
+                _secretsLoading.Visible = false;
+                _filteredSecrets = [.. _secrets];
+                FilterSecrets();
+                SetStatus($"Found {_secrets.Count} secrets");
+            }
+            else
+            {
+                _secretsLoading.Visible = false;
+            }
         });
     }
 
@@ -517,8 +737,11 @@ public class MainWindow : Window
     {
         if (_selectedSecret == null || _selectedVault == null) return;
         
+        var vault = _selectedVault;
+        var secret = _selectedSecret;
+        
         // Check cache first via service
-        var cachedValue = _azureService.GetCachedSecretValue(_selectedVault.Name, _selectedSecret.Name);
+        var cachedValue = _azureService.GetCachedSecretValue(vault.Name, secret.Name);
         if (cachedValue != null)
         {
             _currentSecretValue = cachedValue;
@@ -528,16 +751,20 @@ public class MainWindow : Window
         }
 
         SetStatus("Fetching secret value...");
-        var secret = await _azureService.GetSecretValueAsync(_selectedVault.Name, _selectedSecret.Name);
+        var secretValue = await _azureService.GetSecretValueAsync(vault.Name, secret.Name);
         Application.Invoke(() =>
         {
-            if (secret?.Value != null) 
-            { 
-                _currentSecretValue = secret.Value; 
-                UpdateSecretDetails(); 
-                SetStatus("Secret loaded"); 
+            // Only update if the same vault and secret are still selected
+            if (_selectedVault?.Name == vault.Name && _selectedSecret?.Name == secret.Name)
+            {
+                if (secretValue?.Value != null) 
+                { 
+                    _currentSecretValue = secretValue.Value; 
+                    UpdateSecretDetails(); 
+                    SetStatus("Secret loaded"); 
+                }
+                else SetStatus("Failed to fetch secret - check permissions");
             }
-            else SetStatus("Failed to fetch secret - check permissions");
         });
     }
 

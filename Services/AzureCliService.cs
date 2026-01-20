@@ -214,6 +214,39 @@ public class AzureCliService
         }
     }
 
+    /// <summary>
+    /// Load vaults for multiple subscriptions in parallel for better performance.
+    /// Reports progress via callback (completed, total, currentSubscription).
+    /// </summary>
+    public async Task LoadVaultsAsync(
+        List<string> subscriptionIds, 
+        Action<int, int, string>? progressCallback = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_armClient == null || subscriptionIds.Count == 0) return;
+
+        // Filter out already cached subscriptions
+        var uncachedSubIds = subscriptionIds.Where(id => !AreVaultsCached(id)).ToList();
+        if (uncachedSubIds.Count == 0) return;
+
+        var completed = 0;
+        var total = uncachedSubIds.Count;
+
+        await Parallel.ForEachAsync(
+            uncachedSubIds,
+            new ParallelOptions 
+            { 
+                MaxDegreeOfParallelism = 5, // Limit concurrent requests to avoid throttling
+                CancellationToken = cancellationToken 
+            },
+            async (subId, ct) =>
+            {
+                await GetKeyVaultsAsync(subId); // This will cache the result
+                var currentCompleted = Interlocked.Increment(ref completed);
+                progressCallback?.Invoke(currentCompleted, total, subId);
+            });
+    }
+
     public async Task<List<Models.KeyVaultSecret>> GetSecretsAsync(string vaultName)
     {
         if (_credential == null) return [];
