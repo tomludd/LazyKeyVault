@@ -8,26 +8,26 @@ namespace LazyKeyVault.Services;
 /// A TokenCredential that gets access tokens from Azure CLI.
 /// This allows using the Azure SDK with az cli authentication.
 /// </summary>
-public class AzureCliCredential : TokenCredential
+public class AzureCliCredential(string azCliPath) : TokenCredential
 {
-    private readonly string _azCliPath;
-    private AccessToken? _cachedToken;
-    private readonly object _lock = new();
-
-    public AzureCliCredential(string azCliPath)
-    {
-        _azCliPath = azCliPath;
-    }
+    private readonly string _azCliPath = azCliPath;
+    private readonly Dictionary<string, AccessToken> _cachedTokens = new();
+    private readonly SemaphoreSlim _semaphore = new(1, 1);
 
     /// <summary>
-    /// Clears the cached token, forcing a refresh on next request.
-    /// Call this when the subscription context changes.
+    /// Clears all cached tokens.
+    /// Call this when forcing a full refresh.
     /// </summary>
-    public void ClearCache()
+    public void ClearCacheAsync()
     {
-        lock (_lock)
+        _semaphore.Wait();
+        try
         {
-            _cachedToken = null;
+            _cachedTokens.Clear();
+        }
+        finally
+        {
+            _semaphore.Release();
         }
     }
 
@@ -38,13 +38,33 @@ public class AzureCliCredential : TokenCredential
 
     public override async ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
     {
-        // Check cached token
-        lock (_lock)
+        // Use tenant ID from request context for cache key (empty string if not specified)
+        var tenantId = requestContext.TenantId ?? string.Empty;
+
+        // Check cached token for this tenant
+        await _semaphore.WaitAsync(cancellationToken);
+        AccessToken? cachedToken = null;
+        bool hasValidCache = false;
+
+        try
         {
-            if (_cachedToken.HasValue && _cachedToken.Value.ExpiresOn > DateTimeOffset.UtcNow.AddMinutes(5))
+            if (_cachedTokens.TryGetValue(tenantId, out var token))
             {
-                return _cachedToken.Value;
+                if (token.ExpiresOn > DateTimeOffset.UtcNow.AddMinutes(5))
+                {
+                    cachedToken = token;
+                    hasValidCache = true;
+                }
             }
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+
+        if (hasValidCache && cachedToken.HasValue)
+        {
+            return cachedToken.Value;
         }
 
         // Get the resource/scope - for Key Vault it's https://vault.azure.net
@@ -56,14 +76,20 @@ public class AzureCliCredential : TokenCredential
             resource = scope.EndsWith("/.default") ? scope[..^9] : scope;
         }
 
-        var token = await GetAccessTokenFromCliAsync(resource, cancellationToken);
+        var newToken = await GetAccessTokenFromCliAsync(resource, cancellationToken);
         
-        lock (_lock)
+        // Cache token for this tenant
+        await _semaphore.WaitAsync(cancellationToken);
+        try
         {
-            _cachedToken = token;
+            _cachedTokens[tenantId] = newToken;
+        }
+        finally
+        {
+            _semaphore.Release();
         }
         
-        return token;
+        return newToken;
     }
 
     private async Task<AccessToken> GetAccessTokenFromCliAsync(string resource, CancellationToken cancellationToken)

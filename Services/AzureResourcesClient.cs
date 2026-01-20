@@ -31,14 +31,12 @@ public class AzureResourcesClient
         _armClient = new ArmClient(_credential);
     }
 
-    /// <summary>Clears credentials cache when subscription context changes.</summary>
-    public void ClearCredentialCache()
-    {
-        _credential?.ClearCache();
-    }
-
     /// <summary>Clears all cached data.</summary>
-    public void ClearCache() => _cache.Clear();
+    public void ClearCache()
+    {
+        _credential?.ClearCacheAsync();
+        _cache.Clear();
+    }
 
     #region Key Vault Operations
 
@@ -334,8 +332,8 @@ public class AzureResourcesClient
         {
             var subscription = _armClient.GetSubscriptionResource(
                 new Azure.Core.ResourceIdentifier($"/subscriptions/{subscriptionId}"));
-            var resourceGroupResource = await subscription.GetResourceGroups().GetAsync(resourceGroup);
-            var containerApp = await resourceGroupResource.Value.GetContainerApps().GetAsync(appName);
+            var resourceGroupResource = await subscription.GetResourceGroupAsync(resourceGroup);
+            var containerApp = await resourceGroupResource.Value.GetContainerAppAsync(appName);
 
             var secrets = new List<ContainerAppSecret>();
             
@@ -397,22 +395,59 @@ public class AzureResourcesClient
         return _cache.TryGet<ContainerAppSecret>(cacheKey, out var cached) ? cached?.Value : null;
     }
 
-    /// <summary>Sets or updates a Container App secret using Azure CLI.</summary>
+    /// <summary>Sets or updates a Container App secret using Azure SDK with PATCH.</summary>
     public async Task<(bool Success, string? Error)> SetContainerAppSecretAsync(
         string appName, string resourceGroup, string subscriptionId, string secretName, string value)
     {
+        if (_armClient == null) return (false, "Not authenticated");
+
         try
         {
-            var result = await _cliClient.RunAzCommandAsync(
-                $"containerapp secret set --name \"{appName}\" --resource-group \"{resourceGroup}\" " +
-                $"--subscription \"{subscriptionId}\" --secrets \"{secretName}={value}\"");
+            var subscription = _armClient.GetSubscriptionResource(
+                new Azure.Core.ResourceIdentifier($"/subscriptions/{subscriptionId}"));
+            var resourceGroupResource = await subscription.GetResourceGroupAsync(resourceGroup);
+            var containerAppResource = await resourceGroupResource.Value.GetContainerAppAsync(appName);
             
-            if (result.ExitCode == 0)
+            var containerApp = containerAppResource.Value;
+            var currentData = containerApp.Data;
+            
+            // Ensure configuration exists
+            if (currentData.Configuration == null)
             {
-                return (true, null);
+                return (false, "Container App configuration is null");
             }
             
-            return (false, result.Error ?? "Failed to set secret");
+            // Reload current secrets using listSecrets to get the live state
+            var patchData = new ContainerAppData(currentData.Location)
+            {
+                Configuration = new Azure.ResourceManager.AppContainers.Models.ContainerAppConfiguration()
+            };
+            var currentSecrets = patchData.Configuration.Secrets;
+            
+            await foreach (var secret in containerApp.GetSecretsAsync())
+            {
+                // Skip the secret we're updating - we'll add it back with new value
+                if (secret.Name == secretName)
+                    continue;
+                    
+                // Preserve all existing secrets as-is
+                currentSecrets.Add(new Azure.ResourceManager.AppContainers.Models.ContainerAppWritableSecret
+                {
+                    Name = secret.Name,
+                    Value = secret.Value
+                });
+            }
+            
+            // Add the new/updated secret
+            currentSecrets.Add(new Azure.ResourceManager.AppContainers.Models.ContainerAppWritableSecret
+            {
+                Name = secretName,
+                Value = value
+            });
+            
+            // Use Update which performs JSON Merge Patch
+            await containerApp.UpdateAsync(Azure.WaitUntil.Completed, patchData);
+            return (true, null);
         }
         catch (Exception ex)
         {
@@ -427,27 +462,86 @@ public class AzureResourcesClient
         return SetContainerAppSecretAsync(appName, resourceGroup, subscriptionId, secretName, value);
     }
 
-    /// <summary>Deletes a Container App secret using Azure CLI.</summary>
+    /// <summary>Deletes a Container App secret using Azure SDK with PATCH.</summary>
     public async Task<(bool Success, string? Error)> DeleteContainerAppSecretAsync(
         string appName, string resourceGroup, string subscriptionId, string secretName)
     {
+        if (_armClient == null) return (false, "Not authenticated");
+
         try
         {
-            var result = await _cliClient.RunAzCommandAsync(
-                $"containerapp secret remove --name \"{appName}\" --resource-group \"{resourceGroup}\" " +
-                $"--subscription \"{subscriptionId}\" --secret-names \"{secretName}\"");
+            var subscription = _armClient.GetSubscriptionResource(
+                new Azure.Core.ResourceIdentifier($"/subscriptions/{subscriptionId}"));
+            var resourceGroupResource = await subscription.GetResourceGroupAsync(resourceGroup);
+            var containerAppResource = await resourceGroupResource.Value.GetContainerAppAsync(appName);
             
-            if (result.ExitCode == 0)
+            var containerApp = containerAppResource.Value;
+            var currentData = containerApp.Data;
+            
+            // Ensure configuration exists
+            if (currentData.Configuration == null)
             {
-                return (true, null);
+                return (false, "Container App configuration is null");
             }
             
-            return (false, result.Error ?? "Failed to delete secret");
+            // Reload current secrets using listSecrets to get the live state
+            
+            // Create a new patch data object with only the configuration.secrets
+            var patchData = new Azure.ResourceManager.AppContainers.ContainerAppData(currentData.Location)
+            {
+                Configuration = new Azure.ResourceManager.AppContainers.Models.ContainerAppConfiguration()
+            };
+            var currentSecrets = patchData.Configuration.Secrets;
+            var secretFound = false;
+            
+            await foreach (var secret in containerApp.GetSecretsAsync())
+            {
+                // Skip the secret we're deleting
+                if (secret.Name == secretName)
+                {
+                    secretFound = true;
+                    continue;
+                }
+                    
+                // Preserve all other secrets
+                currentSecrets.Add(new Azure.ResourceManager.AppContainers.Models.ContainerAppWritableSecret
+                {
+                    Name = secret.Name,
+                    Value = secret.Value
+                });
+            }
+            
+            if (!secretFound)
+            {
+                return (false, $"Secret '{secretName}' not found");
+            }
+            
+            // Use Update which performs JSON Merge Patch
+            await containerApp.UpdateAsync(Azure.WaitUntil.Completed, patchData);
+            return (true, null);
         }
         catch (Exception ex)
         {
             return (false, ex.Message);
         }
+    }
+
+    #endregion
+
+    #region Cache Invalidation
+
+    /// <summary>Invalidates cached secrets for a Key Vault.</summary>
+    public void InvalidateSecrets(string vaultName)
+    {
+        _cache.Invalidate($"secrets:{vaultName}");
+        _cache.InvalidatePrefix($"secretvalue:{vaultName}:");
+    }
+
+    /// <summary>Invalidates cached secrets for a Container App.</summary>
+    public void InvalidateContainerAppSecrets(string appName)
+    {
+        _cache.Invalidate($"caappsecrets:{appName}");
+        _cache.InvalidatePrefix($"caappsecretvalue:{appName}:");
     }
 
     #endregion

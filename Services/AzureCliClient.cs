@@ -20,6 +20,7 @@ public class AzureCliClient
 
     private string? _azCliPath;
     private readonly CacheService _cache = new();
+    private string? _currentTenantId;
     
     public string? LastError { get; private set; }
 
@@ -78,6 +79,12 @@ public class AzureCliClient
         {
             var accounts = JsonSerializer.Deserialize<List<AzureAccount>>(result.Output, JsonOptions) ?? [];
             _cache.Set(cacheKey, accounts);
+
+            if(accounts.FirstOrDefault(a => a.IsDefault) is AzureAccount defaultAccount)
+            {
+                _currentTenantId = defaultAccount.TenantId;
+            }
+
             return accounts;
         }
         catch
@@ -86,28 +93,29 @@ public class AzureCliClient
         }
     }
 
-    /// <summary>Retrieves the currently active Azure account/subscription.</summary>
-    public async Task<AzureAccount?> GetCurrentAccountAsync()
+    /// <summary>
+    /// Sets the active Azure subscription if switching to a different tenant.
+    /// </summary>
+    /// <param name="subscriptionId">The subscription ID to switch to</param>
+    /// <param name="tenantId">The tenant ID of the subscription</param>
+    /// <returns>True if successful or no switch needed</returns>
+    public async Task<bool> SetSubscriptionIfNeededAsync(string subscriptionId, string tenantId)
     {
-        var result = await RunAzCommandAsync("account show --output json");
-        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.Output))
-            return null;
-
-        try
+        // If same tenant, no need to switch - SDK handles subscription via resource ID
+        if (_currentTenantId == tenantId)
         {
-            return JsonSerializer.Deserialize<AzureAccount>(result.Output, JsonOptions);
+            return true;
         }
-        catch
-        {
-            return null;
-        }
-    }
 
-    /// <summary>Sets the active Azure subscription.</summary>
-    public async Task<bool> SetSubscriptionAsync(string subscriptionId)
-    {
+        // Switching to different tenant - need to set subscription
         var result = await RunAzCommandAsync($"account set --subscription \"{subscriptionId}\"");
-        return result.ExitCode == 0;
+        if (result.ExitCode == 0)
+        {
+            _currentTenantId = tenantId;
+            return true;
+        }
+        
+        return false;
     }
 
     /// <summary>
