@@ -803,6 +803,11 @@ public class MainWindow : Window
                         _filteredSecrets = [.. _secrets];
                         FilterSecrets();
                         SetStatus($"Found {_secrets.Count} secrets (cached)");
+                        // Auto-select first secret if any exist
+                        if (_filteredSecrets.Count > 0)
+                        {
+                            _secretsList.SelectedItem = 0;
+                        }
                     }
                 });
                 return;
@@ -829,6 +834,11 @@ public class MainWindow : Window
                     _filteredSecrets = [.. _secrets];
                     FilterSecrets();
                     SetStatus($"Found {_secrets.Count} secrets");
+                    // Auto-select first secret if any exist
+                    if (_filteredSecrets.Count > 0)
+                    {
+                        _secretsList.SelectedItem = 0;
+                    }
                 }
                 else
                 {
@@ -864,6 +874,11 @@ public class MainWindow : Window
                         _filteredContainerAppSecrets = [.. _containerAppSecrets];
                         FilterSecretsContainerApp();
                         SetStatus($"Found {_containerAppSecrets.Count} secrets (cached) - Note: Container Apps don't expose secret values");
+                        // Auto-select first secret if any exist
+                        if (_filteredContainerAppSecrets.Count > 0)
+                        {
+                            _secretsList.SelectedItem = 0;
+                        }
                     }
                 });
                 return;
@@ -890,6 +905,11 @@ public class MainWindow : Window
                     _filteredContainerAppSecrets = [.. _containerAppSecrets];
                     FilterSecretsContainerApp();
                     SetStatus($"Found {_containerAppSecrets.Count} secrets - Note: Container Apps don't expose secret values");
+                    // Auto-select first secret if any exist
+                    if (_filteredContainerAppSecrets.Count > 0)
+                    {
+                        _secretsList.SelectedItem = 0;
+                    }
                 }
                 else
                 {
@@ -933,9 +953,31 @@ public class MainWindow : Window
         if (_selectedVault != null)
         {
             var filter = _searchField.Text?.ToString()?.ToLowerInvariant() ?? "";
+            var previousSelection = _selectedSecret;
             _filteredSecrets = string.IsNullOrWhiteSpace(filter) ? [.. _secrets] : _secrets.Where(s => s.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
             _secretsSource.Clear();
             foreach (var s in _filteredSecrets) _secretsSource.Add(EscapeHotkey(s.Name));
+            
+            // Maintain selection if the previously selected secret is still in the filtered list
+            if (previousSelection != null && _filteredSecrets.Any(s => s.Name == previousSelection.Name))
+            {
+                var newIndex = _filteredSecrets.FindIndex(s => s.Name == previousSelection.Name);
+                if (newIndex >= 0)
+                {
+                    _secretsList.SelectedItem = newIndex;
+                }
+            }
+            else if (_filteredSecrets.Count > 0)
+            {
+                // Select first item if previous selection is filtered out
+                _secretsList.SelectedItem = 0;
+            }
+            else
+            {
+                // No secrets in filtered list, clear selection
+                _selectedSecret = null;
+                ClearSecretDetails();
+            }
         }
         else if (_selectedContainerApp != null)
         {
@@ -946,9 +988,31 @@ public class MainWindow : Window
     private void FilterSecretsContainerApp()
     {
         var filter = _searchField.Text?.ToString()?.ToLowerInvariant() ?? "";
+        var previousSelection = _selectedContainerAppSecret;
         _filteredContainerAppSecrets = string.IsNullOrWhiteSpace(filter) ? [.. _containerAppSecrets] : _containerAppSecrets.Where(s => s.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
         _secretsSource.Clear();
         foreach (var s in _filteredContainerAppSecrets) _secretsSource.Add(EscapeHotkey(s.Name));
+        
+        // Maintain selection if the previously selected secret is still in the filtered list
+        if (previousSelection != null && _filteredContainerAppSecrets.Any(s => s.Name == previousSelection.Name))
+        {
+            var newIndex = _filteredContainerAppSecrets.FindIndex(s => s.Name == previousSelection.Name);
+            if (newIndex >= 0)
+            {
+                _secretsList.SelectedItem = newIndex;
+            }
+        }
+        else if (_filteredContainerAppSecrets.Count > 0)
+        {
+            // Select first item if previous selection is filtered out
+            _secretsList.SelectedItem = 0;
+        }
+        else
+        {
+            // No secrets in filtered list, clear selection
+            _selectedContainerAppSecret = null;
+            ClearSecretDetails();
+        }
     }
 
     private void UpdateSecretDetails()
