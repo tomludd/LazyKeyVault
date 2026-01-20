@@ -7,7 +7,9 @@ namespace LazyKeyVault.Views;
 
 public class MainWindow : Window
 {
-    private readonly AzureCliService _azureService;
+    private readonly AzureCliClient _cliClient;
+    private readonly AzureResourcesClient _resourcesClient;
+    private readonly CacheService _cache = new();
 
     // Left panel - Accounts
     private readonly FrameView _accountsFrame;
@@ -63,7 +65,8 @@ public class MainWindow : Window
     public MainWindow()
     {
         BorderStyle = LineStyle.None;
-        _azureService = new AzureCliService();
+        _cliClient = new AzureCliClient();
+        _resourcesClient = new AzureResourcesClient(_cliClient);
 
         // Azure Key Vault themed color scheme (blue tones)
         var azureScheme = new ColorScheme
@@ -133,9 +136,7 @@ public class MainWindow : Window
         _updatedLabel = new Label { Text = "Updated: -", X = Pos.Right(_createdLabel) + 2, Y = Pos.Bottom(_secretValueText) };
         _expiresLabel = new Label { Text = "Expires: -", X = Pos.Right(_updatedLabel) + 2, Y = Pos.Bottom(_secretValueText) };
         _enabledLabel = new Label { Text = "Enabled: -", X = Pos.Right(_expiresLabel) + 2, Y = Pos.Bottom(_secretValueText) };
-        var actionsLabel = new Label { Text = "─── Actions ───", X = 1, Y = Pos.Bottom(_secretValueText) + 1, ColorScheme = new ColorScheme { Normal = new Terminal.Gui.Attribute(Color.Cyan, Color.Black) } };
-        var hintsLabel = new Label { Text = "Ctrl+C Copy  Ctrl+E Edit  Ctrl+N New  Ctrl+D Del  Ctrl+A LoadAll", X = 1, Y = Pos.Bottom(_secretValueText) + 2, ColorScheme = new ColorScheme { Normal = new Terminal.Gui.Attribute(Color.Gray, Color.Black) } };
-        _detailsFrame.Add(_secretNameLabel, valueLabel, _secretValueText, _createdLabel, _updatedLabel, _expiresLabel, _enabledLabel, actionsLabel, hintsLabel);
+        _detailsFrame.Add(_secretNameLabel, valueLabel, _secretValueText, _createdLabel, _updatedLabel, _expiresLabel, _enabledLabel);
 
         // Status bar
         _statusLabel = new Label { Text = "Loading...", X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), ColorScheme = new ColorScheme { Normal = new Terminal.Gui.Attribute(Color.White, Color.Blue) } };
@@ -160,8 +161,6 @@ public class MainWindow : Window
                 case KeyCode.E | KeyCode.CtrlMask: EditSecret(); e.Handled = true; break;
                 case KeyCode.N | KeyCode.CtrlMask: CreateNewSecret(); e.Handled = true; break;
                 case KeyCode.D | KeyCode.CtrlMask: DeleteSecret(); e.Handled = true; break;
-                case KeyCode.A | KeyCode.CtrlMask: _ = LoadAllSecretsForSelectedResourceAsync(); e.Handled = true; break;
-                case (KeyCode)'/': _searchField.SetFocus(); e.Handled = true; break;
                 case KeyCode.Esc when _searchField.HasFocus: _searchField.Text = ""; _secretsList.SetFocus(); e.Handled = true; break;
                 case KeyCode.Q | KeyCode.CtrlMask: Application.RequestStop(); e.Handled = true; break;
                 case KeyCode.Esc: Application.RequestStop(); e.Handled = true; break;
@@ -174,10 +173,36 @@ public class MainWindow : Window
     public async Task InitializeAsync()
     {
         SetStatus("Checking Azure CLI...");
-        var (isInstalled, error) = await _azureService.IsAzureCliInstalledAsync();
+        var (isInstalled, error) = await _cliClient.IsAzureCliInstalledAsync();
         if (!isInstalled) { MessageBox.ErrorQuery("Azure CLI Not Found", error ?? "Unknown error", "OK"); Application.RequestStop(); return; }
-        if (!await _azureService.IsLoggedInAsync()) { MessageBox.ErrorQuery("Not Logged In", "Please run: az login", "OK"); Application.RequestStop(); return; }
+        
+        // Initialize resources client after CLI is verified
+        if (_cliClient.CliPath != null)
+        {
+            _resourcesClient.Initialize(_cliClient.CliPath);
+        }
+        
+        if (!await _cliClient.IsLoggedInAsync()) { MessageBox.ErrorQuery("Not Logged In", "Please run: az login", "OK"); Application.RequestStop(); return; }
         await RefreshDataAsync();
+    }
+
+    private void ClearAllCache()
+    {
+        _cache.Clear();
+        _cliClient.ClearCache();
+        _resourcesClient.ClearCache();
+    }
+
+    private void InvalidateSecrets(string vaultName)
+    {
+        _cache.Invalidate($"secrets:{vaultName}");
+        _cache.InvalidatePrefix($"secretvalue:{vaultName}:");
+    }
+
+    private void InvalidateContainerAppSecrets(string appName)
+    {
+        _cache.Invalidate($"caappsecrets:{appName}");
+        _cache.InvalidatePrefix($"caappsecretvalue:{appName}:");
     }
 
     private async Task RefreshDataAsync(bool force = false)
@@ -188,7 +213,7 @@ public class MainWindow : Window
         var savedVaultIndex = _vaultsList.SelectedItem;
         var savedSecretIndex = _secretsList.SelectedItem;
 
-        if (force) _azureService.ClearCache();
+        if (force) ClearAllCache();
 
         // Clear all UI
         Application.Invoke(() => 
@@ -202,7 +227,7 @@ public class MainWindow : Window
         });
         SetStatus("Refreshing all data...");
 
-        _accounts = await _azureService.GetAccountsAsync();
+        _accounts = await _cliClient.GetAccountsAsync();
 
         // Group by user (tenant) - unique users
         var uniqueUsers = _accounts.GroupBy(a => a.User?.Name ?? a.TenantId).Select(g => g.First()).ToList();
@@ -323,9 +348,9 @@ public class MainWindow : Window
 
     private async Task LoadSecretsForVaultAsync(KeyVault vault)
     {
-        if (_azureService.AreSecretsCached(vault.Name))
+        if (_resourcesClient.AreSecretsCached(vault.Name))
         {
-            _secrets = (await _azureService.GetSecretsAsync(vault.Name))
+            _secrets = (await _resourcesClient.GetSecretsAsync(vault.Name))
                 .OrderBy(s => s.Name)
                 .ToList();
 
@@ -348,10 +373,11 @@ public class MainWindow : Window
 
         if (!string.IsNullOrEmpty(vault.SubscriptionId))
         {
-            await _azureService.SetSubscriptionAsync(vault.SubscriptionId);
+            await _cliClient.SetSubscriptionAsync(vault.SubscriptionId);
+            _resourcesClient.ClearCredentialCache();
         }
 
-        _secrets = (await _azureService.GetSecretsAsync(vault.Name))
+        _secrets = (await _resourcesClient.GetSecretsAsync(vault.Name))
             .OrderBy(s => s.Name)
             .ToList();
 
@@ -449,10 +475,10 @@ public class MainWindow : Window
         
         // Load vaults in background without updating UI - only cache them
         // The UI will be updated when user selects a subscription
-        await _azureService.LoadVaultsAsync(subIds, (completed, total, currentSub) =>
+        await _resourcesClient.LoadVaultsAsync(subIds, (completed, total, currentSub) =>
         {
             // Update status only if not showing subscription-specific info
-            if (_selectedSubscription == null || !_azureService.AreVaultsCached(_selectedSubscription.Id))
+            if (_selectedSubscription == null || !_resourcesClient.AreVaultsCached(_selectedSubscription.Id))
             {
                 var subName = subscriptions.FirstOrDefault(s => s.Id == currentSub)?.Name ?? currentSub;
                 Application.Invoke(() => SetStatus($"Loading vaults ({completed}/{total}): {subName.Substring(0, Math.Min(30, subName.Length))}..."));
@@ -564,14 +590,14 @@ public class MainWindow : Window
     private async Task LoadBothResourcesForSubscriptionAsync(int index, AzureAccount sub)
     {
         // Check if both are cached
-        bool vaultsCached = _azureService.AreVaultsCached(sub.Id);
-        bool appsCached = _azureService.AreContainerAppsCached(sub.Id);
+        bool vaultsCached = _resourcesClient.AreVaultsCached(sub.Id);
+        bool appsCached = _resourcesClient.AreContainerAppsCached(sub.Id);
 
         if (vaultsCached && appsCached)
         {
             // Load from cache in parallel
-            var vaultsTask = _azureService.GetKeyVaultsAsync(sub.Id);
-            var appsTask = _azureService.GetContainerAppsAsync(sub.Id);
+            var vaultsTask = _resourcesClient.GetKeyVaultsAsync(sub.Id);
+            var appsTask = _resourcesClient.GetContainerAppsAsync(sub.Id);
             await Task.WhenAll(vaultsTask, appsTask);
 
             var vaults = vaultsTask.Result.OrderBy(v => v.Name).ToList();
@@ -604,11 +630,12 @@ public class MainWindow : Window
         Application.Invoke(() => { _vaultsLoading.Visible = true; _vaultsSource.Clear(); ClearSecrets(); });
         SetStatus($"Loading resources for {sub.Name}...");
 
-        await _azureService.SetSubscriptionAsync(sub.Id);
+        await _cliClient.SetSubscriptionAsync(sub.Id);
+        _resourcesClient.ClearCredentialCache();
         
         // Load both in parallel
-        var vaultsLoadTask = _azureService.GetKeyVaultsAsync(sub.Id);
-        var appsLoadTask = _azureService.GetContainerAppsAsync(sub.Id);
+        var vaultsLoadTask = _resourcesClient.GetKeyVaultsAsync(sub.Id);
+        var appsLoadTask = _resourcesClient.GetContainerAppsAsync(sub.Id);
         await Task.WhenAll(vaultsLoadTask, appsLoadTask);
 
         var loadedVaults = vaultsLoadTask.Result.OrderBy(v => v.Name).ToList();
@@ -644,9 +671,9 @@ public class MainWindow : Window
     private async Task LoadKeyVaultsForSubscriptionAsync(int index, AzureAccount sub)
     {
         // Check if already cached - if so, skip loading indicator
-        if (_azureService.AreVaultsCached(sub.Id))
+        if (_resourcesClient.AreVaultsCached(sub.Id))
         {
-            var vaults = (await _azureService.GetKeyVaultsAsync(sub.Id))
+            var vaults = (await _resourcesClient.GetKeyVaultsAsync(sub.Id))
                 .OrderBy(v => v.Name)
                 .ToList();
 
@@ -669,8 +696,9 @@ public class MainWindow : Window
         Application.Invoke(() => { _vaultsLoading.Visible = true; _vaultsSource.Clear(); ClearSecrets(); });
         SetStatus($"Loading vaults for {sub.Name}...");
 
-        await _azureService.SetSubscriptionAsync(sub.Id);
-        var loadedVaults = (await _azureService.GetKeyVaultsAsync(sub.Id))
+        await _cliClient.SetSubscriptionAsync(sub.Id);
+        _resourcesClient.ClearCredentialCache();
+        var loadedVaults = (await _resourcesClient.GetKeyVaultsAsync(sub.Id))
             .OrderBy(v => v.Name)
             .ToList();
 
@@ -696,9 +724,9 @@ public class MainWindow : Window
     private async Task LoadContainerAppsForSubscriptionAsync(int index, AzureAccount sub)
     {
         // Check if already cached - if so, skip loading indicator
-        if (_azureService.AreContainerAppsCached(sub.Id))
+        if (_resourcesClient.AreContainerAppsCached(sub.Id))
         {
-            var apps = (await _azureService.GetContainerAppsAsync(sub.Id))
+            var apps = (await _resourcesClient.GetContainerAppsAsync(sub.Id))
                 .OrderBy(a => a.Name)
                 .ToList();
 
@@ -721,8 +749,9 @@ public class MainWindow : Window
         Application.Invoke(() => { _vaultsLoading.Visible = true; _vaultsSource.Clear(); ClearSecrets(); });
         SetStatus($"Loading container apps for {sub.Name}...");
 
-        await _azureService.SetSubscriptionAsync(sub.Id);
-        var loadedApps = (await _azureService.GetContainerAppsAsync(sub.Id))
+        await _cliClient.SetSubscriptionAsync(sub.Id);
+        _resourcesClient.ClearCredentialCache();
+        var loadedApps = (await _resourcesClient.GetContainerAppsAsync(sub.Id))
             .OrderBy(a => a.Name)
             .ToList();
 
@@ -752,7 +781,7 @@ public class MainWindow : Window
         SetStatus($"Loading vaults for {subscriptions.Count} subscriptions...");
 
         // Load vaults for all subscriptions in parallel
-        var tasks = subscriptions.Select(async sub => await _azureService.GetKeyVaultsAsync(sub.Id));
+        var tasks = subscriptions.Select(async sub => await _resourcesClient.GetKeyVaultsAsync(sub.Id));
         var results = await Task.WhenAll(tasks);
         
         var allVaults = results.SelectMany(v => v).ToList();
@@ -787,9 +816,9 @@ public class MainWindow : Window
             _selectedContainerApp = null;
 
             // Check if already cached - if so, skip loading indicator
-            if (_azureService.AreSecretsCached(vault.Name))
+            if (_resourcesClient.AreSecretsCached(vault.Name))
             {
-                var secrets = (await _azureService.GetSecretsAsync(vault.Name))
+                var secrets = (await _resourcesClient.GetSecretsAsync(vault.Name))
                     .OrderBy(s => s.Name)
                     .ToList();
 
@@ -819,10 +848,11 @@ public class MainWindow : Window
 
             if (!string.IsNullOrEmpty(vault.SubscriptionId))
             {
-                await _azureService.SetSubscriptionAsync(vault.SubscriptionId);
+                await _cliClient.SetSubscriptionAsync(vault.SubscriptionId);
+                _resourcesClient.ClearCredentialCache();
             }
 
-            var loadedSecrets = (await _azureService.GetSecretsAsync(vault.Name))
+            var loadedSecrets = (await _resourcesClient.GetSecretsAsync(vault.Name))
                 .OrderBy(s => s.Name)
                 .ToList();
 
@@ -858,9 +888,9 @@ public class MainWindow : Window
             _selectedVault = null;
 
             // Check if already cached - if so, skip loading indicator
-            if (_azureService.AreContainerAppSecretsCached(app.Name))
+            if (_resourcesClient.AreContainerAppSecretsCached(app.Name))
             {
-                var secrets = (await _azureService.GetContainerAppSecretsAsync(app.Name, app.ResourceGroup, app.SubscriptionId))
+                var secrets = (await _resourcesClient.GetContainerAppSecretsAsync(app.Name, app.ResourceGroup, app.SubscriptionId))
                     .OrderBy(s => s.Name)
                     .ToList();
 
@@ -890,10 +920,11 @@ public class MainWindow : Window
 
             if (!string.IsNullOrEmpty(app.SubscriptionId))
             {
-                await _azureService.SetSubscriptionAsync(app.SubscriptionId);
+                await _cliClient.SetSubscriptionAsync(app.SubscriptionId);
+                _resourcesClient.ClearCredentialCache();
             }
 
-            var loadedSecrets = (await _azureService.GetContainerAppSecretsAsync(app.Name, app.ResourceGroup, app.SubscriptionId))
+            var loadedSecrets = (await _resourcesClient.GetContainerAppSecretsAsync(app.Name, app.ResourceGroup, app.SubscriptionId))
                 .OrderBy(s => s.Name)
                 .ToList();
 
@@ -920,7 +951,7 @@ public class MainWindow : Window
         }
     }
 
-    private void OnSecretSelected(object? sender, ListViewItemEventArgs e)
+    private async void OnSecretSelected(object? sender, ListViewItemEventArgs e)
     {
         // Determine which resource type we're dealing with based on what's selected
         if (_selectedVault != null)
@@ -930,8 +961,14 @@ public class MainWindow : Window
             _selectedContainerAppSecret = null;
             
             // Check if we have cached value
-            _currentSecretValue = _azureService.GetCachedSecretValue(_selectedVault.Name, _selectedSecret.Name);
+            _currentSecretValue = _resourcesClient.GetCachedSecretValue(_selectedVault.Name, _selectedSecret.Name);
             UpdateSecretDetails();
+            
+            // Auto-load value if not cached
+            if (_currentSecretValue == null)
+            {
+                await RevealSecretAsync();
+            }
         }
         else if (_selectedContainerApp != null)
         {
@@ -939,7 +976,7 @@ public class MainWindow : Window
             var secret = _filteredContainerAppSecrets[e.Item];
             
             // Check if we have cached value
-            var cachedValue = _azureService.GetCachedContainerAppSecretValue(_selectedContainerApp.Name, secret.Name);
+            var cachedValue = _resourcesClient.GetCachedContainerAppSecretValue(_selectedContainerApp.Name, secret.Name);
             _selectedContainerAppSecret = cachedValue != null ? secret with { Value = cachedValue } : secret;
             _selectedSecret = null;
             UpdateSecretDetailsContainerApp();
@@ -1021,7 +1058,7 @@ public class MainWindow : Window
         if (_selectedSecret == null) { ClearSecretDetails(); return; }
 
         _secretNameLabel.Text = $"Name: {_selectedSecret.Name}";
-        _secretValueText.Text = _currentSecretValue ?? "[Press Enter to load]";
+        _secretValueText.Text = _currentSecretValue ?? "[Loading...]";
 
         var attrs = _selectedSecret.Attributes;
         _createdLabel.Text = !string.IsNullOrEmpty(attrs?.Created) ? $"Created: {FormatDate(attrs.Created)}" : "Created: -";
@@ -1035,7 +1072,7 @@ public class MainWindow : Window
         if (_selectedContainerAppSecret == null) { ClearSecretDetails(); return; }
 
         _secretNameLabel.Text = $"Name: {_selectedContainerAppSecret.Name}";
-        _secretValueText.Text = _selectedContainerAppSecret.Value ?? "[Press Enter to load via Azure CLI]";
+        _secretValueText.Text = _selectedContainerAppSecret.Value ?? "";
         _createdLabel.Text = "Created: -";
         _updatedLabel.Text = "Updated: -";
         _expiresLabel.Text = "Expires: -";
@@ -1062,7 +1099,7 @@ public class MainWindow : Window
             var secret = _selectedSecret;
             
             // Check cache first via service
-            var cachedValue = _azureService.GetCachedSecretValue(vault.Name, secret.Name);
+            var cachedValue = _resourcesClient.GetCachedSecretValue(vault.Name, secret.Name);
             if (cachedValue != null)
             {
                 _currentSecretValue = cachedValue;
@@ -1072,7 +1109,7 @@ public class MainWindow : Window
             }
 
             SetStatus("Fetching secret value...");
-            var secretValue = await _azureService.GetSecretValueAsync(vault.Name, secret.Name);
+            var secretValue = await _resourcesClient.GetSecretValueAsync(vault.Name, secret.Name);
             Application.Invoke(() =>
             {
                 // Only update if the same vault and secret are still selected
@@ -1094,7 +1131,7 @@ public class MainWindow : Window
             var secret = _selectedContainerAppSecret;
             
             // Check cache first
-            var cachedValue = _azureService.GetCachedContainerAppSecretValue(app.Name, secret.Name);
+            var cachedValue = _resourcesClient.GetCachedContainerAppSecretValue(app.Name, secret.Name);
             if (cachedValue != null)
             {
                 _selectedContainerAppSecret = _selectedContainerAppSecret with { Value = cachedValue };
@@ -1104,7 +1141,7 @@ public class MainWindow : Window
             }
 
             SetStatus("Fetching secret value via Azure CLI...");
-            var secretValue = await _azureService.GetContainerAppSecretValueAsync(app.Name, app.ResourceGroup, app.SubscriptionId, secret.Name);
+            var secretValue = await _resourcesClient.GetContainerAppSecretValueAsync(app.Name, app.ResourceGroup, app.SubscriptionId, secret.Name);
             Application.Invoke(() =>
             {
                 // Only update if the same app and secret are still selected
@@ -1131,170 +1168,18 @@ public class MainWindow : Window
         }
     }
 
-    private async Task LoadAllSecretsForSelectedResourceAsync()
-    {
-        if (_selectedVault != null)
-        {
-            await LoadAllSecretsAsync();
-        }
-        else if (_selectedContainerApp != null)
-        {
-            await LoadAllContainerAppSecretsAsync();
-        }
-        else
-        {
-            SetStatus("No resource selected");
-        }
-    }
-
-    private async Task LoadAllSecretsAsync()
-    {
-        if (_selectedVault == null || _secrets.Count == 0) 
-        { 
-            SetStatus("No vault or secrets selected"); 
-            return; 
-        }
-
-        // Filter to only secrets not already cached
-        var vaultName = _selectedVault.Name;
-        var secretsToLoad = _secrets
-            .Where(s => _azureService.GetCachedSecretValue(vaultName, s.Name) == null)
-            .ToList();
-
-        if (secretsToLoad.Count == 0)
-        {
-            SetStatus("All secrets already loaded");
-            return;
-        }
-
-        SetStatus($"Loading {secretsToLoad.Count} secrets (parallel)...");
-        var loaded = 0;
-        var failed = 0;
-
-        // Load in parallel batches of 10 to avoid overwhelming the system
-        const int batchSize = 10;
-        for (var i = 0; i < secretsToLoad.Count; i += batchSize)
-        {
-            var batch = secretsToLoad.Skip(i).Take(batchSize).ToList();
-            var tasks = batch.Select(async secret =>
-            {
-                var result = await _azureService.GetSecretValueAsync(vaultName, secret.Name);
-                return (secret.Name, result?.Value);
-            });
-
-            var results = await Task.WhenAll(tasks);
-            foreach (var (name, value) in results)
-            {
-                if (value != null)
-                {
-                    Interlocked.Increment(ref loaded);
-                }
-                else
-                {
-                    Interlocked.Increment(ref failed);
-                }
-            }
-            
-            var currentLoaded = loaded;
-            var currentFailed = failed;
-            Application.Invoke(() => SetStatus($"Loading secrets... {currentLoaded + (_secrets.Count - secretsToLoad.Count)}/{_secrets.Count}" + (currentFailed > 0 ? $" ({currentFailed} failed)" : "")));
-        }
-
-        // Refresh current selection to show value
-        if (_selectedSecret != null)
-        {
-            _currentSecretValue = _azureService.GetCachedSecretValue(vaultName, _selectedSecret.Name);
-            Application.Invoke(UpdateSecretDetails);
-        }
-
-        var totalLoaded = loaded + (_secrets.Count - secretsToLoad.Count);
-        Application.Invoke(() => SetStatus($"Loaded {totalLoaded} secrets" + (failed > 0 ? $" ({failed} failed)" : "")));
-    }
-
-    private async Task LoadAllContainerAppSecretsAsync()
-    {
-        if (_selectedContainerApp == null || _containerAppSecrets.Count == 0) 
-        { 
-            SetStatus("No container app or secrets selected"); 
-            return; 
-        }
-
-        // Filter to only secrets not already cached
-        var appName = _selectedContainerApp.Name;
-        var secretsToLoad = _containerAppSecrets
-            .Where(s => _azureService.GetCachedContainerAppSecretValue(appName, s.Name) == null)
-            .ToList();
-
-        if (secretsToLoad.Count == 0)
-        {
-            SetStatus("All secrets already loaded");
-            return;
-        }
-
-        SetStatus($"Loading {secretsToLoad.Count} container app secrets (parallel)...");
-        var loaded = 0;
-        var failed = 0;
-
-        // Load in parallel batches of 10 to avoid overwhelming the system
-        const int batchSize = 10;
-        for (var i = 0; i < secretsToLoad.Count; i += batchSize)
-        {
-            var batch = secretsToLoad.Skip(i).Take(batchSize).ToList();
-            var tasks = batch.Select(async secret =>
-            {
-                var result = await _azureService.GetContainerAppSecretValueAsync(
-                    _selectedContainerApp.Name, 
-                    _selectedContainerApp.ResourceGroup, 
-                    _selectedContainerApp.SubscriptionId, 
-                    secret.Name);
-                return (secret.Name, result?.Value);
-            });
-
-            var results = await Task.WhenAll(tasks);
-            foreach (var (name, value) in results)
-            {
-                if (value != null && !value.StartsWith("ERROR:"))
-                {
-                    Interlocked.Increment(ref loaded);
-                }
-                else
-                {
-                    Interlocked.Increment(ref failed);
-                }
-            }
-            
-            var currentLoaded = loaded;
-            var currentFailed = failed;
-            Application.Invoke(() => SetStatus($"Loading secrets... {currentLoaded + (_containerAppSecrets.Count - secretsToLoad.Count)}/{_containerAppSecrets.Count}" + (currentFailed > 0 ? $" ({currentFailed} failed)" : "")));
-        }
-
-        // Refresh current selection to show value
-        if (_selectedContainerAppSecret != null)
-        {
-            var cachedValue = _azureService.GetCachedContainerAppSecretValue(appName, _selectedContainerAppSecret.Name);
-            if (cachedValue != null)
-            {
-                _selectedContainerAppSecret = _selectedContainerAppSecret with { Value = cachedValue };
-                Application.Invoke(UpdateSecretDetailsContainerApp);
-            }
-        }
-
-        var totalLoaded = loaded + (_containerAppSecrets.Count - secretsToLoad.Count);
-        Application.Invoke(() => SetStatus($"Loaded {totalLoaded} secrets" + (failed > 0 ? $" ({failed} failed)" : "")));
-    }
-
     private async void CopySecretToClipboard()
     {
         // Determine which resource type based on what's selected
         if (_selectedVault != null && _selectedSecret != null)
         {
             // Use current value or fetch from service (which caches)
-            var secretValue = _currentSecretValue ?? _azureService.GetCachedSecretValue(_selectedVault.Name, _selectedSecret.Name);
+            var secretValue = _currentSecretValue ?? _resourcesClient.GetCachedSecretValue(_selectedVault.Name, _selectedSecret.Name);
             
             if (secretValue == null)
             {
                 SetStatus("Fetching secret...");
-                var secret = await _azureService.GetSecretValueAsync(_selectedVault.Name, _selectedSecret.Name);
+                var secret = await _resourcesClient.GetSecretValueAsync(_selectedVault.Name, _selectedSecret.Name);
                 secretValue = secret?.Value;
             }
             
@@ -1309,12 +1194,12 @@ public class MainWindow : Window
         {
             var app = _selectedContainerApp;
             var secret = _selectedContainerAppSecret;
-            var secretValue = secret.Value ?? _azureService.GetCachedContainerAppSecretValue(app.Name, secret.Name);
+            var secretValue = secret.Value ?? _resourcesClient.GetCachedContainerAppSecretValue(app.Name, secret.Name);
             
             if (secretValue == null)
             {
                 SetStatus("Fetching secret via Azure CLI...");
-                var secretResult = await _azureService.GetContainerAppSecretValueAsync(app.Name, app.ResourceGroup, app.SubscriptionId, secret.Name);
+                var secretResult = await _resourcesClient.GetContainerAppSecretValueAsync(app.Name, app.ResourceGroup, app.SubscriptionId, secret.Name);
                 secretValue = secretResult?.Value;
                 
                 Application.Invoke(() =>
@@ -1378,7 +1263,7 @@ public class MainWindow : Window
             var newValue = valueField.Text?.ToString() ?? "";
             if (string.IsNullOrEmpty(newValue)) { MessageBox.ErrorQuery("Error", "Value cannot be empty", "OK"); return; }
             dialog.RequestStop(); SetStatus("Updating...");
-            var (success, error) = await _azureService.SetSecretAsync(_selectedVault!.Name, _selectedSecret!.Name, newValue);
+            var (success, error) = await _resourcesClient.SetSecretAsync(_selectedVault!.Name, _selectedSecret!.Name, newValue);
             Application.Invoke(() => { if (success) { _currentSecretValue = newValue; UpdateSecretDetails(); SetStatus("Updated"); } else SetStatus($"Failed: {error}"); });
         };
 
@@ -1394,7 +1279,7 @@ public class MainWindow : Window
     {
         if (_selectedContainerAppSecret == null || _selectedContainerApp == null) return;
 
-        var currentValue = _selectedContainerAppSecret.Value ?? _azureService.GetCachedContainerAppSecretValue(_selectedContainerApp.Name, _selectedContainerAppSecret.Name);
+        var currentValue = _selectedContainerAppSecret.Value ?? _resourcesClient.GetCachedContainerAppSecretValue(_selectedContainerApp.Name, _selectedContainerAppSecret.Name);
 
         var dialog = new Dialog { Title = "Edit Container App Secret", Width = 60, Height = 10 };
         var nameLabel = new Label { Text = $"Name: {_selectedContainerAppSecret.Name}", X = 1, Y = 1 };
@@ -1407,7 +1292,7 @@ public class MainWindow : Window
             var newValue = valueField.Text?.ToString() ?? "";
             if (string.IsNullOrEmpty(newValue)) { MessageBox.ErrorQuery("Error", "Value cannot be empty", "OK"); return; }
             dialog.RequestStop(); SetStatus("Updating via Azure CLI...");
-            var (success, error) = await _azureService.SetContainerAppSecretAsync(_selectedContainerApp!.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId, _selectedContainerAppSecret!.Name, newValue);
+            var (success, error) = await _resourcesClient.SetContainerAppSecretAsync(_selectedContainerApp!.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId, _selectedContainerAppSecret!.Name, newValue);
             Application.Invoke(() => 
             { 
                 if (success) 
@@ -1464,10 +1349,10 @@ public class MainWindow : Window
             var name = nameField.Text?.ToString() ?? ""; var value = valueField.Text?.ToString() ?? "";
             if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(value)) { MessageBox.ErrorQuery("Error", "Name and value required", "OK"); return; }
             dialog.RequestStop(); SetStatus("Creating...");
-            var (success, error) = await _azureService.SetSecretAsync(_selectedVault!.Name, name, value);
+            var (success, error) = await _resourcesClient.SetSecretAsync(_selectedVault!.Name, name, value);
             Application.Invoke(async () =>
             {
-                if (success) { _azureService.InvalidateSecrets(_selectedVault!.Name); _secrets = (await _azureService.GetSecretsAsync(_selectedVault!.Name)).OrderBy(s => s.Name).ToList(); _filteredSecrets = [.. _secrets]; FilterSecrets(); SetStatus("Created"); }
+                if (success) { InvalidateSecrets(_selectedVault!.Name); _secrets = (await _resourcesClient.GetSecretsAsync(_selectedVault!.Name)).OrderBy(s => s.Name).ToList(); _filteredSecrets = [.. _secrets]; FilterSecrets(); SetStatus("Created"); }
                 else SetStatus($"Failed: {error}");
             });
         };
@@ -1496,13 +1381,13 @@ public class MainWindow : Window
             var name = nameField.Text?.ToString() ?? ""; var value = valueField.Text?.ToString() ?? "";
             if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(value)) { MessageBox.ErrorQuery("Error", "Name and value required", "OK"); return; }
             dialog.RequestStop(); SetStatus("Creating via Azure CLI...");
-            var (success, error) = await _azureService.CreateContainerAppSecretAsync(_selectedContainerApp!.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId, name, value);
+            var (success, error) = await _resourcesClient.CreateContainerAppSecretAsync(_selectedContainerApp!.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId, name, value);
             Application.Invoke(async () =>
             {
                 if (success) 
                 { 
-                    _azureService.InvalidateContainerAppSecrets(_selectedContainerApp!.Name); 
-                    _containerAppSecrets = (await _azureService.GetContainerAppSecretsAsync(_selectedContainerApp!.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId)).OrderBy(s => s.Name).ToList(); 
+                    InvalidateContainerAppSecrets(_selectedContainerApp!.Name); 
+                    _containerAppSecrets = (await _resourcesClient.GetContainerAppSecretsAsync(_selectedContainerApp!.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId)).OrderBy(s => s.Name).ToList(); 
                     _filteredContainerAppSecrets = [.. _containerAppSecrets]; 
                     FilterSecretsContainerApp(); 
                     SetStatus("Created"); 
@@ -1542,10 +1427,10 @@ public class MainWindow : Window
     {
         if (_selectedSecret == null || _selectedVault == null) return;
         SetStatus("Deleting...");
-        var (success, error) = await _azureService.DeleteSecretAsync(_selectedVault.Name, _selectedSecret.Name);
+        var (success, error) = await _resourcesClient.DeleteSecretAsync(_selectedVault.Name, _selectedSecret.Name);
         Application.Invoke(async () =>
         {
-            if (success) { _azureService.InvalidateSecrets(_selectedVault!.Name); _secrets = (await _azureService.GetSecretsAsync(_selectedVault!.Name)).OrderBy(s => s.Name).ToList(); _filteredSecrets = [.. _secrets]; FilterSecrets(); ClearSecretDetails(); SetStatus("Deleted"); }
+            if (success) { InvalidateSecrets(_selectedVault!.Name); _secrets = (await _resourcesClient.GetSecretsAsync(_selectedVault!.Name)).OrderBy(s => s.Name).ToList(); _filteredSecrets = [.. _secrets]; FilterSecrets(); ClearSecretDetails(); SetStatus("Deleted"); }
             else SetStatus($"Failed: {error}");
         });
     }
@@ -1554,13 +1439,13 @@ public class MainWindow : Window
     {
         if (_selectedContainerAppSecret == null || _selectedContainerApp == null) return;
         SetStatus("Deleting via Azure CLI...");
-        var (success, error) = await _azureService.DeleteContainerAppSecretAsync(_selectedContainerApp.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId, _selectedContainerAppSecret.Name);
+        var (success, error) = await _resourcesClient.DeleteContainerAppSecretAsync(_selectedContainerApp.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId, _selectedContainerAppSecret.Name);
         Application.Invoke(async () =>
         {
             if (success) 
             { 
-                _azureService.InvalidateContainerAppSecrets(_selectedContainerApp!.Name); 
-                _containerAppSecrets = (await _azureService.GetContainerAppSecretsAsync(_selectedContainerApp!.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId)).OrderBy(s => s.Name).ToList(); 
+                InvalidateContainerAppSecrets(_selectedContainerApp!.Name); 
+                _containerAppSecrets = (await _resourcesClient.GetContainerAppSecretsAsync(_selectedContainerApp!.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId)).OrderBy(s => s.Name).ToList(); 
                 _filteredContainerAppSecrets = [.. _containerAppSecrets]; 
                 FilterSecretsContainerApp(); 
                 ClearSecretDetails(); 
@@ -1570,7 +1455,7 @@ public class MainWindow : Window
         });
     }
 
-    private void SetStatus(string msg) => _statusLabel.Text = $" {msg} | ^1-5:Panels ^C:Copy ^E:Edit ^N:New ^D:Del ^A:LoadAll ^R:Refresh [/]Search [Esc]Quit";
+    private void SetStatus(string msg) => _statusLabel.Text = $" {msg} | ^1-5:Panels ^C:Copy ^E:Edit ^N:New ^D:Del ^R:Refresh [Esc]Quit";
 
     private static string FormatDate(string? isoDate)
     {
@@ -1583,3 +1468,14 @@ public class MainWindow : Window
     // Escape underscores to prevent Terminal.Gui from treating them as hotkey markers
     private static string EscapeHotkey(string text) => text.Replace("_", "__");
 }
+
+
+
+
+
+
+
+
+
+
+
