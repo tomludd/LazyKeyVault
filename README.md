@@ -1,6 +1,6 @@
 # LazyKeyVault
 
-A terminal UI for Azure Key Vault secrets management, inspired by [LazyDocker](https://github.com/jesseduffield/lazydocker) and [LazyGit](https://github.com/jesseduffield/lazygit).
+A terminal UI for Azure Key Vault and Container Apps secrets management, inspired by [LazyDocker](https://github.com/jesseduffield/lazydocker) and [LazyGit](https://github.com/jesseduffield/lazygit).
 
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)
 ![Terminal.Gui](https://img.shields.io/badge/Terminal.Gui-2.0-blue)
@@ -9,33 +9,44 @@ A terminal UI for Azure Key Vault secrets management, inspired by [LazyDocker](h
 
 ## Features
 
-- 🔐 **Browse Azure Key Vaults** across multiple accounts and subscriptions
-- 🎨 **Colorful UI** with unique colors per subscription/vault name
+- 🔐 **Browse Azure Key Vaults and Container Apps** across multiple accounts and subscriptions
+- 🎨 **Colorful UI** with unique colors per subscription/vault/app name
 - ✏️ **Create, edit, and delete** secrets directly from the terminal
 - 📋 **Copy to clipboard** with a single keystroke
 - 🔍 **Filter secrets** by name
 - ⚡ **Fast** - uses Azure SDK with intelligent caching
 - ⌨️ **Keyboard-driven** interface
+- 🐳 **Container Apps support** - manage secrets for Azure Container Apps alongside Key Vaults
 
 ## Prerequisites
 
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
+- [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or later
 - [Azure CLI](https://docs.microsoft.com/cli/azure/install-azure-cli) installed and logged in
+
+
+## Usage
+
+    lazykeyvault
 
 ## Installation
 
-### Install as .NET Tool from NuGet
+    dotnet tool install --global LazyKeyVault
+
+### Login with Azure CLI
+Make sure you are logged in with Azure CLI
+
+    az login
+
+
+## Run without Installing
 
 ```bash
-dotnet tool install --global LazyKeyVault
+git clone https://github.com/tomludd/LazyKeyVault.git
+cd LazyKeyVault
+dotnet run
 ```
 
-Then run:
-```bash
-lazykeyvault
-```
-
-### Install from Local Build
+## Install tool from Local Build
 
 ```bash
 # Clone the repository
@@ -47,34 +58,12 @@ dotnet pack -c Release -o ./nupkg
 dotnet tool install -g --add-source ./nupkg LazyKeyVault
 ```
 
-Then run:
-```bash
-lazykeyvault
-```
-
-### Update Local Installation
+### Update Local tool
 
 ```bash
 dotnet tool uninstall -g LazyKeyVault
 dotnet pack -c Release -o ./nupkg
 dotnet tool install -g --add-source ./nupkg LazyKeyVault
-```
-
-### Run without Installing
-
-```bash
-cd LazyKeyVault
-dotnet run
-```
-
-## Usage
-
-```bash
-# Make sure you're logged in to Azure CLI
-az login
-
-# Run the application
-lazykeyvault
 ```
 
 ## Keyboard Shortcuts
@@ -83,16 +72,16 @@ lazykeyvault
 |-----|--------|
 | `Ctrl+1` | Focus Accounts panel |
 | `Ctrl+2` | Focus Subscriptions panel |
-| `Ctrl+3` | Focus Key Vaults panel |
+| `Ctrl+3` | Focus Resources panel (Key Vaults / Container Apps) |
 | `Ctrl+4` | Focus Secrets panel |
 | `Ctrl+5` | Focus Details panel |
 | `↑/↓` | Navigate lists |
 | `Enter` | Reveal secret value |
-| `Ctrl+C` | Copy secret to clipboard |
-| `Ctrl+E` | Edit selected secret |
-| `Ctrl+N` | Create new secret |
-| `Ctrl+D` | Delete selected secret |
-| `Ctrl+A` | Load all secret values |
+| `Ctrl+C` | Copy secret to clipboard (works for both Key Vaults and Container Apps) |
+| `Ctrl+E` | Edit selected secret (works for both Key Vaults and Container Apps) |
+| `Ctrl+N` | Create new secret (works for both Key Vaults and Container Apps) |
+| `Ctrl+D` | Delete selected secret (works for both Key Vaults and Container Apps) |
+| `Ctrl+A` | Load all secret values (works for both Key Vaults and Container Apps) |
 | `Ctrl+R` | Refresh data (clear cache) |
 | `/` | Focus search/filter field |
 | `Esc` | Clear search / Quit |
@@ -110,13 +99,26 @@ lazykeyvault
 │   tst-myapp                   ││ Name:    my-secret                       │
 │ other-subscription            ││ Value:   [Press Enter to load]           │
 ╰───────────────────────────────╯│ Created: 2025-01-10 14:30:22             │
-╭─Key Vaults (^3)───────────────╮│ Updated: 2025-01-14 09:15:33             │
+╭─Resources (^3)────────────────╮│ Updated: 2025-01-14 09:15:33             │
 │ kv-dev-myapp                  ││ Expires: Never                           │
 │ kv-prd-myapp                  ││ Enabled: Yes                             │
-│ kv-tst-myapp                  ││ ─── Actions ───                          │
+│ ca-myapp                      ││ ─── Actions ───                          │
 ╰───────────────────────────────╯╰──────────────────────────────────────────╯
  ^1-5:Panels ^C:Copy ^E:Edit ^N:New ^D:Del ^A:LoadAll ^R:Refresh [/]Search
 ```
+
+## Supported Resources
+
+### Azure Key Vault
+- Full CRUD operations on secrets
+- Secret metadata (created, updated, expires, enabled status)
+- Fast SDK-based operations with intelligent caching
+
+### Azure Container Apps
+- Full CRUD operations on secrets
+- Uses Azure CLI for secret management
+- Parallel loading of secret values and Container Apps resource listing
+- **Azure CLI** - Authentication via `az login` and Container Apps secret operationsdata like Key Vaults do
 
 ## Security
 
