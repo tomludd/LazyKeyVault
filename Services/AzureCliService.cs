@@ -34,7 +34,11 @@ public class AzureCliService
     public void InvalidateSecrets(string vaultName) => _cache.Invalidate($"secrets:{vaultName}");
 
     /// <summary>Invalidates secrets cache for a container app. Call after create/delete.</summary>
-    public void InvalidateContainerAppSecrets(string appName) => _cache.Invalidate($"caappsecrets:{appName}");
+    public void InvalidateContainerAppSecrets(string appName)
+    {
+        _cache.Invalidate($"caappsecrets:{appName}");
+        _cache.InvalidatePrefix($"caappsecretvalue:{appName}:");
+    }
 
     public async Task<(bool IsInstalled, string? Error)> IsAzureCliInstalledAsync()
     {
@@ -461,18 +465,23 @@ public class AzureCliService
         {
             var subscription = _armClient.GetSubscriptionResource(new Azure.Core.ResourceIdentifier($"/subscriptions/{subscriptionId}"));
             var resourceGroupResource = await subscription.GetResourceGroups().GetAsync(resourceGroup);
-            var app = await resourceGroupResource.Value.GetContainerApps().GetAsync(appName);
-            
+            var containerApp = await resourceGroupResource.Value.GetContainerApps().GetAsync(appName);
+
+            // Use the GetSecretsAsync method which calls the /listSecrets endpoint
             var secrets = new List<ContainerAppSecret>();
-            if (app.Value.Data.Configuration?.Secrets != null)
+            
+            await foreach (var secret in containerApp.Value.GetSecretsAsync())
             {
-                foreach (var secret in app.Value.Data.Configuration.Secrets)
-                {
-                    secrets.Add(new ContainerAppSecret(
-                        Name: secret.Name ?? "",
-                        Value: null // Value not exposed in list operation
-                    ));
-                }
+                var containerAppSecret = new ContainerAppSecret(
+                    Name: secret.Name ?? "",
+                    Value: secret.Value
+                );
+                
+                secrets.Add(containerAppSecret);
+                
+                // Also cache individual secret values for faster lookup
+                var secretValueCacheKey = $"caappsecretvalue:{appName}:{secret.Name}";
+                _cache.Set(secretValueCacheKey, containerAppSecret);
             }
             
             _cache.Set(cacheKey, secrets);
@@ -490,74 +499,21 @@ public class AzureCliService
         if (_cache.TryGet<ContainerAppSecret>(cacheKey, out var cached) && cached != null)
             return cached;
 
-        try
+        // Retrieve all secrets (this will populate the cache)
+        var allSecrets = await GetContainerAppSecretsAsync(appName, resourceGroup, subscriptionId);
+        
+        // Find the requested secret
+        var secret = allSecrets.FirstOrDefault(s => s.Name == secretName);
+        
+        if (secret == null)
         {
-            // Use Azure CLI to retrieve the secret value
-            var result = await RunAzCommandAsync($"containerapp secret show --name \"{appName}\" --resource-group \"{resourceGroup}\" --subscription \"{subscriptionId}\" --secret-name \"{secretName}\" --output json");
-            
-            if (result.ExitCode != 0)
-            {
-                // Return error information as a special secret with error in value
-                var errorMessage = !string.IsNullOrWhiteSpace(result.Error) 
-                    ? result.Error 
-                    : "Failed to retrieve secret. Check permissions and Azure CLI version.";
-                
-                // Avoid double ERROR prefix if message already starts with it
-                if (!errorMessage.StartsWith("ERROR:", StringComparison.OrdinalIgnoreCase))
-                {
-                    errorMessage = $"ERROR: {errorMessage}";
-                }
-                
-                return new ContainerAppSecret(
-                    Name: secretName,
-                    Value: errorMessage
-                );
-            }
-
-            if (string.IsNullOrWhiteSpace(result.Output))
-            {
-                return new ContainerAppSecret(
-                    Name: secretName,
-                    Value: "ERROR: No output from Azure CLI"
-                );
-            }
-
-            // Parse the JSON output - secret show returns a single secret object
-            var secretData = JsonSerializer.Deserialize<ContainerAppSecretResult>(result.Output, JsonOptions);
-            
-            if (secretData != null)
-            {
-                var secretWithValue = new ContainerAppSecret(
-                    Name: secretData.Name ?? "",
-                    Value: secretData.Value
-                );
-                
-                _cache.Set(cacheKey, secretWithValue);
-                return secretWithValue;
-            }
-            
             return new ContainerAppSecret(
                 Name: secretName,
                 Value: "ERROR: Secret not found in Container App configuration"
             );
         }
-        catch (Exception ex)
-        {
-            return new ContainerAppSecret(
-                Name: secretName,
-                Value: $"ERROR: {ex.Message}"
-            );
-        }
-    }
 
-    // Helper class for deserializing Azure CLI output
-    private class ContainerAppSecretResult
-    {
-        [JsonPropertyName("name")]
-        public string? Name { get; set; }
-        
-        [JsonPropertyName("value")]
-        public string? Value { get; set; }
+        return secret;
     }
 
     public async Task<(bool Success, string? Error)> SetContainerAppSecretAsync(string appName, string resourceGroup, string subscriptionId, string secretName, string value)

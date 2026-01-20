@@ -127,13 +127,14 @@ public class MainWindow : Window
         _detailsFrame = new FrameView { Title = "Secret Details (^5)", X = Pos.Right(_accountsFrame), Y = Pos.Bottom(_secretsFrame), Width = Dim.Fill(), Height = Dim.Fill(1), ColorScheme = frameScheme, BorderStyle = LineStyle.Rounded };
         _secretNameLabel = new Label { Text = "Name: -", X = 1, Y = 1, Width = Dim.Fill(1), ColorScheme = new ColorScheme { Normal = new Terminal.Gui.Attribute(Color.BrightCyan, Color.Black) } };
         var valueLabel = new Label { Text = "Value:", X = 1, Y = 3, ColorScheme = new ColorScheme { Normal = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Black) } };
-        _secretValueText = new TextView { X = 1, Y = 4, Width = Dim.Fill(1), Height = 2, ReadOnly = true, WordWrap = true, ColorScheme = new ColorScheme { Normal = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Black) } };
-        _createdLabel = new Label { Text = "Created: -", X = 1, Y = 7 };
-        _updatedLabel = new Label { Text = "Updated: -", X = 1, Y = 8 };
-        _expiresLabel = new Label { Text = "Expires: -", X = 1, Y = 9 };
-        _enabledLabel = new Label { Text = "Enabled: -", X = 1, Y = 10 };
-        var actionsLabel = new Label { Text = "─── Actions ───", X = 1, Y = 11, ColorScheme = new ColorScheme { Normal = new Terminal.Gui.Attribute(Color.Cyan, Color.Black) } };
-        var hintsLabel = new Label { Text = "Ctrl+C Copy  Ctrl+E Edit  Ctrl+N New  Ctrl+D Del  Ctrl+A LoadAll", X = 1, Y = 12, ColorScheme = new ColorScheme { Normal = new Terminal.Gui.Attribute(Color.Gray, Color.Black) } };
+        _secretValueText = new TextView { X = 1, Y = 4, Width = Dim.Fill(1), Height = Dim.Fill(4), ReadOnly = true, WordWrap = true, ColorScheme = new ColorScheme { Normal = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Black) } };
+        // All metadata on a single line
+        _createdLabel = new Label { Text = "Created: -", X = 1, Y = Pos.Bottom(_secretValueText) };
+        _updatedLabel = new Label { Text = "Updated: -", X = Pos.Right(_createdLabel) + 2, Y = Pos.Bottom(_secretValueText) };
+        _expiresLabel = new Label { Text = "Expires: -", X = Pos.Right(_updatedLabel) + 2, Y = Pos.Bottom(_secretValueText) };
+        _enabledLabel = new Label { Text = "Enabled: -", X = Pos.Right(_expiresLabel) + 2, Y = Pos.Bottom(_secretValueText) };
+        var actionsLabel = new Label { Text = "─── Actions ───", X = 1, Y = Pos.Bottom(_secretValueText) + 1, ColorScheme = new ColorScheme { Normal = new Terminal.Gui.Attribute(Color.Cyan, Color.Black) } };
+        var hintsLabel = new Label { Text = "Ctrl+C Copy  Ctrl+E Edit  Ctrl+N New  Ctrl+D Del  Ctrl+A LoadAll", X = 1, Y = Pos.Bottom(_secretValueText) + 2, ColorScheme = new ColorScheme { Normal = new Terminal.Gui.Attribute(Color.Gray, Color.Black) } };
         _detailsFrame.Add(_secretNameLabel, valueLabel, _secretValueText, _createdLabel, _updatedLabel, _expiresLabel, _enabledLabel, actionsLabel, hintsLabel);
 
         // Status bar
