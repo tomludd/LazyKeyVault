@@ -118,6 +118,76 @@ public partial class MainWindow
         return text.Replace("_", "__");
     }
 
+    /// <summary>Splits a long error message into multiple lines for display in ListView.</summary>
+    private static List<string> SplitErrorMessage(string error, int maxWidth = 60)
+    {
+        var lines = new List<string>();
+        var prefix = "⚠ ERROR: ";
+        
+        // Add prefix to first line
+        var text = error;
+        var firstLineMaxWidth = maxWidth - prefix.Length;
+        
+        if (text.Length <= firstLineMaxWidth)
+        {
+            lines.Add(prefix + text);
+            return lines;
+        }
+        
+        // Split by sentences or phrases first (periods, commas)
+        var parts = text.Split(new[] { ". ", ", " }, StringSplitOptions.RemoveEmptyEntries);
+        var currentLine = prefix;
+        var isFirstLine = true;
+        
+        foreach (var part in parts)
+        {
+            var partWithPunctuation = part.TrimEnd('.', ',');
+            var punctuation = text.Contains(part + ". ") ? ". " : text.Contains(part + ", ") ? ", " : "";
+            
+            var lineMaxWidth = isFirstLine ? firstLineMaxWidth : maxWidth;
+            
+            if ((currentLine.Length - (isFirstLine ? 0 : prefix.Length)) + partWithPunctuation.Length + punctuation.Length <= lineMaxWidth)
+            {
+                currentLine += partWithPunctuation + punctuation;
+            }
+            else
+            {
+                if (currentLine.Length > prefix.Length)
+                {
+                    lines.Add(currentLine.TrimEnd());
+                    currentLine = "  " + partWithPunctuation + punctuation; // Indent continuation lines
+                    isFirstLine = false;
+                }
+                else
+                {
+                    // Word is too long for the line, break it by words
+                    var words = partWithPunctuation.Split(' ');
+                    foreach (var word in words)
+                    {
+                        if (currentLine.Length + word.Length + 1 <= (isFirstLine ? firstLineMaxWidth : maxWidth))
+                        {
+                            currentLine += (currentLine.EndsWith(prefix) || currentLine.EndsWith("  ") ? "" : " ") + word;
+                        }
+                        else
+                        {
+                            lines.Add(currentLine);
+                            currentLine = "  " + word;
+                            isFirstLine = false;
+                        }
+                    }
+                    currentLine += punctuation;
+                }
+            }
+        }
+        
+        if (currentLine.Length > 2)
+        {
+            lines.Add(currentLine.TrimEnd());
+        }
+        
+        return lines.Count > 0 ? lines : [prefix + error];
+    }
+
     /// <summary>Updates the status bar with a message and keyboard shortcuts.</summary>
     private void SetStatus(string msg)
     {

@@ -170,9 +170,8 @@ public partial class MainWindow
     {
         if (_resourcesClient.AreSecretsCached(vault.Name))
         {
-            _secrets = (await _resourcesClient.GetSecretsAsync(vault.Name))
-                .OrderBy(s => s.Name)
-                .ToList();
+            var (cachedSecrets, _) = await _resourcesClient.GetSecretsAsync(vault.Name);
+            _secrets = cachedSecrets.OrderBy(s => s.Name).ToList();
 
             Application.Invoke(() =>
             {
@@ -197,9 +196,8 @@ public partial class MainWindow
         
         SetStatus($"Loading secrets from {vault.Name}...");
 
-        _secrets = (await _resourcesClient.GetSecretsAsync(vault.Name))
-            .OrderBy(s => s.Name)
-            .ToList();
+        var (loadedSecrets, error) = await _resourcesClient.GetSecretsAsync(vault.Name);
+        _secrets = loadedSecrets.OrderBy(s => s.Name).ToList();
 
         Application.Invoke(() =>
         {
@@ -208,7 +206,20 @@ public partial class MainWindow
                 _secretsLoading.Visible = false;
                 _filteredSecrets = [.. _secrets];
                 FilterSecrets();
-                SetStatus($"Found {_secrets.Count} secrets");
+                
+                if (error != null)
+                {
+                    SetStatus($"⚠ Failed to load secrets");
+                    _secretsSource.Clear();
+                    foreach (var line in SplitErrorMessage(error))
+                    {
+                        _secretsSource.Add(line);
+                    }
+                }
+                else
+                {
+                    SetStatus($"Found {_secrets.Count} secrets");
+                }
             }
             else
             {
@@ -557,7 +568,8 @@ public partial class MainWindow
                     if (success)
                     {
                         _resourcesClient.InvalidateSecrets(_selectedVault!.Name);
-                        _secrets = (await _resourcesClient.GetSecretsAsync(_selectedVault!.Name)).OrderBy(s => s.Name).ToList();
+                        var (secrets, _) = await _resourcesClient.GetSecretsAsync(_selectedVault!.Name);
+                        _secrets = secrets.OrderBy(s => s.Name).ToList();
                         _filteredSecrets = [.. _secrets];
                         FilterSecrets();
                         SetStatus("Created");
@@ -583,7 +595,8 @@ public partial class MainWindow
                     if (success)
                     {
                         _resourcesClient.InvalidateContainerAppSecrets(_selectedContainerApp!.Name);
-                        _containerAppSecrets = (await _resourcesClient.GetContainerAppSecretsAsync(_selectedContainerApp!.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId)).OrderBy(s => s.Name).ToList();
+                        var (secrets, _) = await _resourcesClient.GetContainerAppSecretsAsync(_selectedContainerApp!.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId);
+                        _containerAppSecrets = secrets.OrderBy(s => s.Name).ToList();
                         _filteredContainerAppSecrets = [.. _containerAppSecrets];
                         FilterSecretsContainerApp();
                         SetStatus("Created");
@@ -641,7 +654,8 @@ public partial class MainWindow
             if (success)
             {
                 _resourcesClient.InvalidateSecrets(_selectedVault!.Name);
-                _secrets = (await _resourcesClient.GetSecretsAsync(_selectedVault!.Name)).OrderBy(s => s.Name).ToList();
+                var (secrets, _) = await _resourcesClient.GetSecretsAsync(_selectedVault!.Name);
+                _secrets = secrets.OrderBy(s => s.Name).ToList();
                 _filteredSecrets = [.. _secrets];
                 FilterSecrets();
                 ClearSecretDetails();
@@ -669,7 +683,8 @@ public partial class MainWindow
             if (success)
             {
                 _resourcesClient.InvalidateContainerAppSecrets(_selectedContainerApp!.Name);
-                _containerAppSecrets = (await _resourcesClient.GetContainerAppSecretsAsync(_selectedContainerApp!.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId)).OrderBy(s => s.Name).ToList();
+                var (secrets, _) = await _resourcesClient.GetContainerAppSecretsAsync(_selectedContainerApp!.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId);
+                _containerAppSecrets = secrets.OrderBy(s => s.Name).ToList();
                 _filteredContainerAppSecrets = [.. _containerAppSecrets];
                 FilterSecretsContainerApp();
                 ClearSecretDetails();

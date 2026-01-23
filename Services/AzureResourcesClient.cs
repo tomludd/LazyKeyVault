@@ -112,13 +112,13 @@ public class AzureResourcesClient
     }
 
     /// <summary>Retrieves secrets for a Key Vault with caching.</summary>
-    public async Task<List<Models.KeyVaultSecret>> GetSecretsAsync(string vaultName)
+    public async Task<(List<Models.KeyVaultSecret> Secrets, string? Error)> GetSecretsAsync(string vaultName)
     {
-        if (_credential == null) return [];
+        if (_credential == null) return ([], "Not authenticated");
 
         var cacheKey = $"secrets:{vaultName}";
         if (_cache.TryGet<List<Models.KeyVaultSecret>>(cacheKey, out var cached) && cached != null)
-            return cached;
+            return (cached, null);
 
         try
         {
@@ -143,11 +143,21 @@ public class AzureResourcesClient
             }
             
             _cache.Set(cacheKey, secrets);
-            return secrets;
+            return (secrets, null);
         }
-        catch
+        catch (Azure.RequestFailedException ex)
         {
-            return [];
+            var error = ex.Status switch
+            {
+                403 => $"Access denied: You don't have permission to list secrets in '{vaultName}'. Check your Key Vault access policies or RBAC roles.",
+                _ when ex.Message.Contains("IP") || ex.Message.Contains("network") => $"Network error: '{vaultName}' may have IP restrictions. Error: {ex.Message}",
+                _ => $"Failed to load secrets: {ex.Message}"
+            };
+            return ([], error);
+        }
+        catch (Exception ex)
+        {
+            return ([], $"Error loading secrets from '{vaultName}': {ex.Message}");
         }
     }
 
@@ -319,14 +329,14 @@ public class AzureResourcesClient
     }
 
     /// <summary>Retrieves secrets for a Container App with caching.</summary>
-    public async Task<List<ContainerAppSecret>> GetContainerAppSecretsAsync(
+    public async Task<(List<ContainerAppSecret> Secrets, string? Error)> GetContainerAppSecretsAsync(
         string appName, string resourceGroup, string subscriptionId)
     {
-        if (_armClient == null) return [];
+        if (_armClient == null) return ([], "Not authenticated");
 
         var cacheKey = $"caappsecrets:{appName}";
         if (_cache.TryGet<List<ContainerAppSecret>>(cacheKey, out var cached) && cached != null)
-            return cached;
+            return (cached, null);
 
         try
         {
@@ -352,11 +362,21 @@ public class AzureResourcesClient
             }
             
             _cache.Set(cacheKey, secrets);
-            return secrets;
+            return (secrets, null);
         }
-        catch
+        catch (Azure.RequestFailedException ex)
         {
-            return [];
+            var error = ex.Status switch
+            {
+                403 => $"Access denied: You don't have permission to list secrets for Container App '{appName}'. Check your RBAC roles.",
+                404 => $"Container App '{appName}' not found or has been deleted.",
+                _ => $"Failed to load secrets: {ex.Message}"
+            };
+            return ([], error);
+        }
+        catch (Exception ex)
+        {
+            return ([], $"Error loading secrets from Container App '{appName}': {ex.Message}");
         }
     }
 
@@ -373,7 +393,7 @@ public class AzureResourcesClient
             return cached;
 
         // Retrieve all secrets (this will populate the cache)
-        var allSecrets = await GetContainerAppSecretsAsync(appName, resourceGroup, subscriptionId);
+        var (allSecrets, _) = await GetContainerAppSecretsAsync(appName, resourceGroup, subscriptionId);
         
         var secret = allSecrets.FirstOrDefault(s => s.Name == secretName);
         

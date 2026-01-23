@@ -293,13 +293,13 @@ public partial class MainWindow
         // Check if already cached
         if (_resourcesClient.AreSecretsCached(vault.Name))
         {
-            var secrets = (await _resourcesClient.GetSecretsAsync(vault.Name)).OrderBy(s => s.Name).ToList();
+            var (cachedSecrets, _) = await _resourcesClient.GetSecretsAsync(vault.Name);
 
             Application.Invoke(() =>
             {
                 if (_vaultsList.SelectedItem == itemIndex && itemIndex < _keyVaults.Count && _keyVaults[itemIndex].Name == vault.Name)
                 {
-                    _secrets = secrets;
+                    _secrets = cachedSecrets.OrderBy(s => s.Name).ToList();
                     _secretsSource.Clear();
                     ClearSecretDetails();
                     _filteredSecrets = [.. _secrets];
@@ -329,21 +329,33 @@ public partial class MainWindow
             await _cliClient.SetSubscriptionIfNeededAsync(vault.SubscriptionId, _selectedSubscription.TenantId);
         }
 
-        var loadedSecrets = (await _resourcesClient.GetSecretsAsync(vault.Name)).OrderBy(s => s.Name).ToList();
+        var (loadedSecrets, error) = await _resourcesClient.GetSecretsAsync(vault.Name);
 
         Application.Invoke(() =>
         {
             if (_vaultsList.SelectedItem == itemIndex && itemIndex < _keyVaults.Count && _keyVaults[itemIndex].Name == vault.Name)
             {
-                _secrets = loadedSecrets;
+                _secrets = loadedSecrets.OrderBy(s => s.Name).ToList();
                 _secretsLoading.Visible = false;
                 _filteredSecrets = [.. _secrets];
                 FilterSecrets();
-                SetStatus($"Found {_secrets.Count} secrets");
                 
-                if (_filteredSecrets.Count > 0)
+                if (error != null)
                 {
-                    _secretsList.SelectedItem = 0;
+                    SetStatus($"⚠ Failed to load secrets");
+                    _secretsSource.Clear();
+                    foreach (var line in SplitErrorMessage(error))
+                    {
+                        _secretsSource.Add(line);
+                    }
+                }
+                else
+                {
+                    SetStatus($"Found {_secrets.Count} secrets");
+                    if (_filteredSecrets.Count > 0)
+                    {
+                        _secretsList.SelectedItem = 0;
+                    }
                 }
             }
             else
@@ -368,13 +380,13 @@ public partial class MainWindow
         // Check if already cached
         if (_resourcesClient.AreContainerAppSecretsCached(app.Name))
         {
-            var secrets = (await _resourcesClient.GetContainerAppSecretsAsync(app.Name, app.ResourceGroup, app.SubscriptionId)).OrderBy(s => s.Name).ToList();
+            var (cachedSecrets, _) = await _resourcesClient.GetContainerAppSecretsAsync(app.Name, app.ResourceGroup, app.SubscriptionId);
 
             Application.Invoke(() =>
             {
                 if (_vaultsList.SelectedItem == itemIndex && appIndex < _containerApps.Count && _containerApps[appIndex].Name == app.Name)
                 {
-                    _containerAppSecrets = secrets;
+                    _containerAppSecrets = cachedSecrets.OrderBy(s => s.Name).ToList();
                     _secretsSource.Clear();
                     ClearSecretDetails();
                     _filteredContainerAppSecrets = [.. _containerAppSecrets];
@@ -404,21 +416,33 @@ public partial class MainWindow
             await _cliClient.SetSubscriptionIfNeededAsync(app.SubscriptionId, _selectedSubscription.TenantId);
         }
 
-        var loadedSecrets = (await _resourcesClient.GetContainerAppSecretsAsync(app.Name, app.ResourceGroup, app.SubscriptionId)).OrderBy(s => s.Name).ToList();
+        var (loadedSecrets, error) = await _resourcesClient.GetContainerAppSecretsAsync(app.Name, app.ResourceGroup, app.SubscriptionId);
 
         Application.Invoke(() =>
         {
             if (_vaultsList.SelectedItem == itemIndex && appIndex < _containerApps.Count && _containerApps[appIndex].Name == app.Name)
             {
-                _containerAppSecrets = loadedSecrets;
+                _containerAppSecrets = loadedSecrets.OrderBy(s => s.Name).ToList();
                 _secretsLoading.Visible = false;
                 _filteredContainerAppSecrets = [.. _containerAppSecrets];
                 FilterSecretsContainerApp();
-                SetStatus($"Found {_containerAppSecrets.Count} secrets - Note: Container Apps don't expose secret values");
                 
-                if (_filteredContainerAppSecrets.Count > 0)
+                if (error != null)
                 {
-                    _secretsList.SelectedItem = 0;
+                    SetStatus($"⚠ Failed to load secrets");
+                    _secretsSource.Clear();
+                    foreach (var line in SplitErrorMessage(error))
+                    {
+                        _secretsSource.Add(line);
+                    }
+                }
+                else
+                {
+                    SetStatus($"Found {_containerAppSecrets.Count} secrets - Note: Container Apps don't expose secret values");
+                    if (_filteredContainerAppSecrets.Count > 0)
+                    {
+                        _secretsList.SelectedItem = 0;
+                    }
                 }
             }
             else
