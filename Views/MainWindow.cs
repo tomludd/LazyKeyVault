@@ -1,4 +1,5 @@
-using Terminal.Gui;
+using Terminal.Gui.Views;
+using Terminal.Gui.Drawing;
 using LazyKeyVault.Models;
 using LazyKeyVault.Services;
 using System.Collections.ObjectModel;
@@ -43,7 +44,7 @@ public partial class MainWindow : Window
 
     // Secret details
     private readonly FrameView _detailsFrame;
-    private readonly Label _secretNameLabel, _createdLabel, _updatedLabel, _expiresLabel, _enabledLabel;
+    private readonly Label _secretNameLabel, _createdLabel, _updatedLabel, _expiresLabel, _enabledLabel, _notBeforeLabel;
     private readonly TextView _secretValueText;
 
     // Status bar
@@ -57,9 +58,10 @@ public partial class MainWindow : Window
     private List<ContainerApp> _containerApps = [];
     private List<KeyVaultSecret> _secrets = [], _filteredSecrets = [];
     private List<ContainerAppSecret> _containerAppSecrets = [], _filteredContainerAppSecrets = [];
-    private ObservableCollection<string> _accountsSource = [], _secretsSource = [];
+    private ObservableCollection<string> _accountsSource = [];
     private ColoredListDataSource _subscriptionsSource = new();
     private ColoredListDataSource _vaultsSource = new();
+    private ColoredListDataSource _secretsSource = new();
 
     // ===== SELECTION STATE =====
     private AzureAccount? _selectedAccount, _selectedSubscription;
@@ -70,7 +72,11 @@ public partial class MainWindow : Window
     private string? _currentSecretValue;
 
     // ===== UI CONSTANTS =====
-    private static readonly Color GroupColor = Color.BrightCyan;
+    private static readonly Color GroupColor = ColorName16.BrightCyan;
+    private static readonly Color DisabledSecretColor = ColorName16.DarkGray;
+    private static readonly Color ExpiredSecretColor = ColorName16.BrightRed;
+    private static readonly Color ExpiringSoonSecretColor = ColorName16.BrightYellow;
+    private const int ExpiryWarningDays = 30;
 }
 
 

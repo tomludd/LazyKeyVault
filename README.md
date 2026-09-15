@@ -3,7 +3,7 @@
 A terminal UI for Azure Key Vault and Container Apps secrets management, inspired by [LazyDocker](https://github.com/jesseduffield/lazydocker) and [LazyGit](https://github.com/jesseduffield/lazygit).
 
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)
-![Terminal.Gui](https://img.shields.io/badge/Terminal.Gui-2.0-blue)
+![Terminal.Gui](https://img.shields.io/badge/Terminal.Gui-2.5-blue)
 [![NuGet](https://img.shields.io/nuget/v/LazyKeyVault.svg)](https://www.nuget.org/packages/LazyKeyVault/)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -12,6 +12,8 @@ A terminal UI for Azure Key Vault and Container Apps secrets management, inspire
 - 🔐 **Browse Azure Key Vaults and Container Apps** across multiple accounts and subscriptions
 - 🎨 **Colorful UI** with unique colors per subscription/vault/app name
 - ✏️ **Create, edit, and delete** secrets directly from the terminal
+- ⏳ **Expiry at a glance** - expired/soon-to-expire Key Vault secrets are highlighted in the list, with a countdown in the details panel
+- ⚙️ **Edit secret settings** - toggle enabled, set content type, expiry, and "not before" per Key Vault secret
 - 📋 **Copy to clipboard** with a single keystroke
 - 🔍 **Filter secrets** by name
 - ⚡ **Fast** - uses Azure SDK with intelligent caching
@@ -79,6 +81,7 @@ dotnet tool install -g --add-source ./nupkg LazyKeyVault
 | `Enter` | Reveal secret value |
 | `Ctrl+C` | Copy secret to clipboard (works for both Key Vaults and Container Apps) |
 | `Ctrl+E` | Edit selected secret (works for both Key Vaults and Container Apps) |
+| `Ctrl+P` | Edit secret settings: enabled, content type, expiry, not-before (Key Vault secrets only) |
 | `Ctrl+N` | Create new secret (works for both Key Vaults and Container Apps) |
 | `Ctrl+D` | Delete selected secret (works for both Key Vaults and Container Apps) |
 | `Ctrl+A` | Load all secret values (works for both Key Vaults and Container Apps) |

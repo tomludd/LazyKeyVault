@@ -227,6 +227,35 @@ public class AzureResourcesClient
         }
     }
 
+    /// <summary>Updates a secret's settings (enabled, content type, expiry, not-before) without changing its value.</summary>
+    public async Task<(bool Success, string? Error)> UpdateSecretPropertiesAsync(
+        string vaultName, string secretName, bool enabled, string? contentType,
+        DateTimeOffset? expiresOn, DateTimeOffset? notBefore)
+    {
+        if (_credential == null) return (false, "Not authenticated");
+
+        try
+        {
+            var client = GetSecretClient(vaultName);
+            // Built from just the name rather than fetching the secret first - updating properties
+            // doesn't require reading the secret's value, so this avoids requiring Key Vault "Get" access.
+            var properties = new SecretProperties(secretName)
+            {
+                Enabled = enabled,
+                ContentType = contentType,
+                ExpiresOn = expiresOn,
+                NotBefore = notBefore
+            };
+
+            await client.UpdateSecretPropertiesAsync(properties);
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
     /// <summary>Deletes a secret from Key Vault.</summary>
     public async Task<(bool Success, string? Error)> DeleteSecretAsync(string vaultName, string secretName)
     {
@@ -550,11 +579,17 @@ public class AzureResourcesClient
 
     #region Cache Invalidation
 
-    /// <summary>Invalidates cached secrets for a Key Vault.</summary>
+    /// <summary>Invalidates cached secrets for a Key Vault, including cached secret values.</summary>
     public void InvalidateSecrets(string vaultName)
     {
         _cache.Invalidate($"secrets:{vaultName}");
         _cache.InvalidatePrefix($"secretvalue:{vaultName}:");
+    }
+
+    /// <summary>Invalidates only the cached secret list/metadata for a Key Vault, leaving cached secret values intact.</summary>
+    public void InvalidateSecretProperties(string vaultName)
+    {
+        _cache.Invalidate($"secrets:{vaultName}");
     }
 
     /// <summary>Invalidates cached secrets for a Container App.</summary>

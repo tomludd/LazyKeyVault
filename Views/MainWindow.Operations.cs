@@ -1,4 +1,5 @@
-using Terminal.Gui;
+using Terminal.Gui.App;
+using Terminal.Gui.Drawing;
 using LazyKeyVault.Models;
 using LazyKeyVault.Services;
 
@@ -13,10 +14,10 @@ public partial class MainWindow
     private async Task RefreshDataAsync(bool force = false)
     {
         // Save current selections
-        var savedAccountIndex = _accountsList.SelectedItem;
-        var savedSubscriptionIndex = _subscriptionsList.SelectedItem;
-        var savedVaultIndex = _vaultsList.SelectedItem;
-        var savedSecretIndex = _secretsList.SelectedItem;
+        var savedAccountIndex = _accountsList.SelectedItem ?? -1;
+        var savedSubscriptionIndex = _subscriptionsList.SelectedItem ?? -1;
+        var savedVaultIndex = _vaultsList.SelectedItem ?? -1;
+        var savedSecretIndex = _secretsList.SelectedItem ?? -1;
 
         if (force)
         {
@@ -150,7 +151,7 @@ public partial class MainWindow
                 // Restore secret selection
                 if (secretIndex >= 0 && secretIndex < _filteredSecrets.Count)
                 {
-                    Application.Invoke(() => _secretsList.SelectedItem = secretIndex);
+                    Application.Invoke(() => SelectSecretAt(secretIndex));
                 }
             }
         }
@@ -241,21 +242,21 @@ public partial class MainWindow
             _secretsSource.Clear();
             foreach (var s in _filteredSecrets)
             {
-                _secretsSource.Add(EscapeHotkey(s.Name));
+                _secretsSource.Add(EscapeHotkey(s.Name), GetSecretStatusColor(s));
             }
-            
+
             // Maintain selection if the previously selected secret is still in the filtered list
             if (previousSelection != null && _filteredSecrets.Any(s => s.Name == previousSelection.Name))
             {
                 var newIndex = _filteredSecrets.FindIndex(s => s.Name == previousSelection.Name);
                 if (newIndex >= 0)
                 {
-                    _secretsList.SelectedItem = newIndex;
+                    SelectSecretAt(newIndex);
                 }
             }
             else if (_filteredSecrets.Count > 0)
             {
-                _secretsList.SelectedItem = 0;
+                SelectSecretAt(0);
             }
             else
             {
@@ -266,6 +267,36 @@ public partial class MainWindow
         else if (_selectedContainerApp != null)
         {
             FilterSecretsContainerApp();
+        }
+    }
+
+    /// <summary>
+    /// Selects a Key Vault secret in the ListView by filtered-list index, forcing the Details panel to
+    /// refresh even when the ListView's index doesn't actually change - e.g. after switching vaults while
+    /// row 0 was already selected, or after a settings edit that didn't move the row. Terminal.Gui's
+    /// ListView.SelectedItem setter is a no-op (and so never raises ValueChanged, which OnSecretSelected
+    /// relies on) when reassigned the same index.
+    /// </summary>
+    private void SelectSecretAt(int index)
+    {
+        var indexUnchanged = _secretsList.SelectedItem == index;
+        _secretsList.SelectedItem = index;
+
+        if (indexUnchanged)
+        {
+            _ = ApplyKeyVaultSecretSelectionAsync(index);
+        }
+    }
+
+    /// <summary>See <see cref="SelectSecretAt"/> - same fix, for Container App secrets.</summary>
+    private void SelectContainerAppSecretAt(int index)
+    {
+        var indexUnchanged = _secretsList.SelectedItem == index;
+        _secretsList.SelectedItem = index;
+
+        if (indexUnchanged)
+        {
+            ApplyContainerAppSecretSelection(index);
         }
     }
 
@@ -289,12 +320,12 @@ public partial class MainWindow
             var newIndex = _filteredContainerAppSecrets.FindIndex(s => s.Name == previousSelection.Name);
             if (newIndex >= 0)
             {
-                _secretsList.SelectedItem = newIndex;
+                SelectContainerAppSecretAt(newIndex);
             }
         }
         else if (_filteredContainerAppSecrets.Count > 0)
         {
-            _secretsList.SelectedItem = 0;
+            SelectContainerAppSecretAt(0);
         }
         else
         {
@@ -317,8 +348,12 @@ public partial class MainWindow
         var attrs = _selectedSecret.Attributes;
         _createdLabel.Text = !string.IsNullOrEmpty(attrs?.Created) ? $"Created: {FormatDate(attrs.Created)}" : "Created: -";
         _updatedLabel.Text = !string.IsNullOrEmpty(attrs?.Updated) ? $"Updated: {FormatDate(attrs.Updated)}" : "Updated: -";
-        _expiresLabel.Text = !string.IsNullOrEmpty(attrs?.Expires) ? $"Expires: {FormatDate(attrs.Expires)}" : "Expires: Never";
+        _expiresLabel.Text = !string.IsNullOrEmpty(attrs?.Expires)
+            ? $"Expires: {FormatDate(attrs.Expires)}{GetExpirySuffix(attrs.Expires)}"
+            : "Expires: Never";
+        _expiresLabel.SetScheme(GetExpiryLabelScheme(attrs?.Expires));
         _enabledLabel.Text = $"Enabled: {(attrs?.Enabled == true ? "Yes" : "No")}";
+        _notBeforeLabel.Text = !string.IsNullOrEmpty(attrs?.NotBefore) ? $"Not Before: {FormatDate(attrs.NotBefore)}" : "Not Before: -";
     }
 
     private void UpdateSecretDetailsContainerApp()
@@ -334,7 +369,9 @@ public partial class MainWindow
         _createdLabel.Text = "Created: -";
         _updatedLabel.Text = "Updated: -";
         _expiresLabel.Text = "Expires: -";
+        _expiresLabel.SetScheme(null);
         _enabledLabel.Text = "Enabled: -";
+        _notBeforeLabel.Text = "Not Before: -";
     }
 
     private async Task RevealSecretAsync()
@@ -424,14 +461,14 @@ public partial class MainWindow
         if (_selectedVault != null && _selectedSecret != null)
         {
             var secretValue = _currentSecretValue ?? _resourcesClient.GetCachedSecretValue(_selectedVault.Name, _selectedSecret.Name);
-            
+
             if (secretValue == null)
             {
                 SetStatus("Fetching secret...");
                 var secret = await _resourcesClient.GetSecretValueAsync(_selectedVault.Name, _selectedSecret.Name);
                 secretValue = secret?.Value;
             }
-            
+
             if (secretValue != null)
             {
                 try
@@ -452,13 +489,13 @@ public partial class MainWindow
         else if (_selectedContainerApp != null && _selectedContainerAppSecret != null)
         {
             var secretValue = _selectedContainerAppSecret.Value ?? _resourcesClient.GetCachedContainerAppSecretValue(_selectedContainerApp.Name, _selectedContainerAppSecret.Name);
-            
+
             if (secretValue == null)
             {
                 SetStatus("Fetching secret via Azure CLI...");
                 var secretResult = await _resourcesClient.GetContainerAppSecretValueAsync(_selectedContainerApp.Name, _selectedContainerApp.ResourceGroup, _selectedContainerApp.SubscriptionId, _selectedContainerAppSecret.Name);
                 secretValue = secretResult?.Value;
-                
+
                 Application.Invoke(() =>
                 {
                     if (secretValue != null && _selectedContainerApp != null && _selectedContainerAppSecret != null)
@@ -468,14 +505,14 @@ public partial class MainWindow
                     }
                 });
             }
-            
+
             // Don't copy if it's an error message
             if (secretValue != null && secretValue.StartsWith("ERROR:"))
             {
                 Application.Invoke(() => SetStatus("Cannot copy - error fetching secret"));
                 return;
             }
-            
+
             if (secretValue != null)
             {
                 try
@@ -552,6 +589,73 @@ public partial class MainWindow
         {
             SetStatus("No secret selected");
         }
+    }
+
+    private void EditSecretSettings()
+    {
+        if (_selectedVault == null || _selectedSecret == null)
+        {
+            SetStatus(_selectedContainerApp != null ? "Container App secrets have no settings to edit" : "No secret selected");
+            return;
+        }
+
+        var vault = _selectedVault;
+        var secret = _selectedSecret;
+        var attrs = secret.Attributes;
+
+        var dialog = DialogFactory.CreateSecretSettingsDialog(
+            secret.Name,
+            attrs?.Enabled ?? true,
+            secret.ContentType,
+            ParseIsoDate(attrs?.Expires),
+            ParseIsoDate(attrs?.NotBefore),
+            async (enabled, contentType, expiresOn, notBefore) =>
+            {
+                SetStatus("Updating secret settings...");
+                var (success, error) = await _resourcesClient.UpdateSecretPropertiesAsync(
+                    vault.Name, secret.Name, enabled, contentType, expiresOn, notBefore);
+
+                Application.Invoke(() =>
+                {
+                    if (success)
+                    {
+                        // Only the secrets-list/metadata cache needs invalidating - the value wasn't touched,
+                        // so leave any cached secret value alone.
+                        _resourcesClient.InvalidateSecretProperties(vault.Name);
+
+                        if (_selectedVault?.Name == vault.Name)
+                        {
+                            // Apply the saved values locally instead of re-listing the whole vault just to
+                            // learn back the 4 fields we already have; Updated is approximated as "now" since
+                            // Key Vault doesn't return the new value from a property update call.
+                            var updatedAttrs = new SecretAttributes(
+                                enabled,
+                                attrs?.Created,
+                                DateTimeOffset.UtcNow.ToString("o"),
+                                expiresOn?.ToString("o"),
+                                notBefore?.ToString("o"));
+                            var updatedSecret = secret with { ContentType = contentType, Attributes = updatedAttrs };
+
+                            var existingIndex = _secrets.FindIndex(s => s.Name == secret.Name);
+                            if (existingIndex >= 0)
+                            {
+                                _secrets[existingIndex] = updatedSecret;
+                            }
+
+                            _selectedSecret = updatedSecret;
+                            FilterSecrets();
+                            SetStatus("Settings updated");
+                        }
+                    }
+                    else
+                    {
+                        SetStatus($"Failed: {error}");
+                        DialogFactory.ShowError("Update Settings Failed", error ?? "Unknown error occurred");
+                    }
+                });
+            });
+
+        Application.Run(dialog);
     }
 
     private void CreateNewSecret()

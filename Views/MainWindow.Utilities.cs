@@ -1,4 +1,5 @@
-using Terminal.Gui;
+using Terminal.Gui.Drawing;
+using LazyKeyVault.Models;
 
 namespace LazyKeyVault.Views;
 
@@ -24,6 +25,17 @@ public partial class MainWindow
         return isoDate;
     }
 
+    /// <summary>Parses an ISO date string from Key Vault secret attributes into a DateTimeOffset.</summary>
+    private static DateTimeOffset? ParseIsoDate(string? isoDate)
+    {
+        if (string.IsNullOrEmpty(isoDate))
+        {
+            return null;
+        }
+
+        return DateTimeOffset.TryParse(isoDate, out var dto) ? dto : null;
+    }
+
     /// <summary>Generates a deterministic color based on a name string.</summary>
     private static Color GetNameColor(string name)
     {
@@ -34,17 +46,17 @@ public partial class MainWindow
         // Use a set of vibrant, readable colors (avoiding too dark or too similar to background)
         Color[] colors =
         [
-            Color.BrightRed,
-            Color.BrightGreen,
-            Color.BrightYellow,
-            Color.BrightBlue,
-            Color.BrightMagenta,
-            Color.BrightCyan,
-            Color.Red,
-            Color.Green,
-            Color.Yellow,
-            Color.Magenta,
-            Color.Cyan,
+            ColorName16.BrightRed,
+            ColorName16.BrightGreen,
+            ColorName16.BrightYellow,
+            ColorName16.BrightBlue,
+            ColorName16.BrightMagenta,
+            ColorName16.BrightCyan,
+            ColorName16.Red,
+            ColorName16.Green,
+            ColorName16.Yellow,
+            ColorName16.Magenta,
+            ColorName16.Cyan,
             new Color(255, 165, 0),   // Orange
             new Color(255, 105, 180), // Hot Pink
             new Color(0, 255, 127),   // Spring Green
@@ -191,7 +203,7 @@ public partial class MainWindow
     /// <summary>Updates the status bar with a message and keyboard shortcuts.</summary>
     private void SetStatus(string msg)
     {
-        _statusLabel.Text = $" {msg} | ^1-5:Panels ^C:Copy ^E:Edit ^N:New ^D:Del ^R:Refresh [Esc]Quit";
+        _statusLabel.Text = $" {msg} | ^1-5:Panels ^C:Copy ^E:Edit ^P:Settings ^N:New ^D:Del ^R:Refresh [Esc]Quit";
     }
 
     /// <summary>Clears all vaults and secrets from the UI.</summary>
@@ -219,6 +231,78 @@ public partial class MainWindow
         _createdLabel.Text = "Created: -";
         _updatedLabel.Text = "Updated: -";
         _expiresLabel.Text = "Expires: -";
+        _expiresLabel.SetScheme(null);
         _enabledLabel.Text = "Enabled: -";
+        _notBeforeLabel.Text = "Not Before: -";
+    }
+
+    private enum ExpiryStatus { None, ExpiringSoon, Expired }
+
+    /// <summary>Classifies an expiry date against <see cref="ExpiryWarningDays"/>, parsing it once via <see cref="ParseIsoDate"/> for all expiry-related display logic to share.</summary>
+    private static (ExpiryStatus Status, TimeSpan Remaining) ClassifyExpiry(string? isoExpiryDate)
+    {
+        var expires = ParseIsoDate(isoExpiryDate);
+        if (expires == null)
+        {
+            return (ExpiryStatus.None, TimeSpan.Zero);
+        }
+
+        var remaining = expires.Value - DateTimeOffset.UtcNow;
+        if (remaining <= TimeSpan.Zero)
+        {
+            return (ExpiryStatus.Expired, remaining);
+        }
+        if (remaining <= TimeSpan.FromDays(ExpiryWarningDays))
+        {
+            return (ExpiryStatus.ExpiringSoon, remaining);
+        }
+
+        return (ExpiryStatus.None, remaining);
+    }
+
+    /// <summary>Determines the list color for a secret based on its enabled/expiry status.
+    /// Expired takes priority over Disabled so a disabled-and-expired secret still reads as
+    /// expired in the list, matching the Details panel (which shows "[EXPIRED]" regardless of
+    /// Enabled).</summary>
+    private static Color? GetSecretStatusColor(KeyVaultSecret secret)
+    {
+        var attrs = secret.Attributes;
+        var (status, _) = ClassifyExpiry(attrs?.Expires);
+
+        if (status == ExpiryStatus.Expired)
+        {
+            return ExpiredSecretColor;
+        }
+
+        if (attrs?.Enabled == false)
+        {
+            return DisabledSecretColor;
+        }
+
+        return status == ExpiryStatus.ExpiringSoon ? ExpiringSoonSecretColor : null;
+    }
+
+    /// <summary>Builds a "days left"/"[EXPIRED]" suffix for an expiry date, or empty string if not near expiry.</summary>
+    private static string GetExpirySuffix(string? isoExpiryDate)
+    {
+        var (status, remaining) = ClassifyExpiry(isoExpiryDate);
+        return status switch
+        {
+            ExpiryStatus.Expired => " [EXPIRED]",
+            ExpiryStatus.ExpiringSoon => $" ({Math.Max(1, (int)Math.Ceiling(remaining.TotalDays))}d left)",
+            _ => ""
+        };
+    }
+
+    /// <summary>Gets a warning-colored scheme for the expiry label, or null to use the default scheme.</summary>
+    private static Scheme? GetExpiryLabelScheme(string? isoExpiryDate)
+    {
+        var (status, _) = ClassifyExpiry(isoExpiryDate);
+        return status switch
+        {
+            ExpiryStatus.Expired => new Scheme { Normal = new Terminal.Gui.Drawing.Attribute(ExpiredSecretColor, ColorName16.Black) },
+            ExpiryStatus.ExpiringSoon => new Scheme { Normal = new Terminal.Gui.Drawing.Attribute(ExpiringSoonSecretColor, ColorName16.Black) },
+            _ => null
+        };
     }
 }

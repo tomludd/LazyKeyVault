@@ -1,4 +1,5 @@
-using Terminal.Gui;
+using Terminal.Gui.App;
+using Terminal.Gui.Drivers;
 
 namespace LazyKeyVault.Views;
 
@@ -48,12 +49,17 @@ public partial class MainWindow
                     CopySecretToClipboard();
                     e.Handled = true;
                     break;
-                    
+
                 case KeyCode.E | KeyCode.CtrlMask:
                     EditSecret();
                     e.Handled = true;
                     break;
-                    
+
+                case KeyCode.P | KeyCode.CtrlMask:
+                    EditSecretSettings();
+                    e.Handled = true;
+                    break;
+
                 case KeyCode.N | KeyCode.CtrlMask:
                     CreateNewSecret();
                     e.Handled = true;

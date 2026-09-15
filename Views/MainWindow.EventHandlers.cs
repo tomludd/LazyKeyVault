@@ -1,4 +1,6 @@
-using Terminal.Gui;
+using Terminal.Gui.App;
+using Terminal.Gui.Drawing;
+using Terminal.Gui.Input;
 using LazyKeyVault.Models;
 using LazyKeyVault.Services;
 
@@ -10,15 +12,16 @@ namespace LazyKeyVault.Views;
 /// </summary>
 public partial class MainWindow
 {
-    private async void OnAccountSelected(object? sender, ListViewItemEventArgs e)
+    private async void OnAccountSelected(object? sender, ValueChangedEventArgs<int?> e)
     {
+        var itemIndex = e.NewValue ?? -1;
         var uniqueUsers = _accounts.GroupBy(a => a.User?.Name ?? a.TenantId).Select(g => g.First()).ToList();
-        if (e.Item < 0 || e.Item >= uniqueUsers.Count)
+        if (itemIndex < 0 || itemIndex >= uniqueUsers.Count)
         {
             return;
         }
 
-        _selectedAccount = uniqueUsers[e.Item];
+        _selectedAccount = uniqueUsers[itemIndex];
         var userName = _selectedAccount.User?.Name ?? _selectedAccount.TenantId;
 
         Application.Invoke(() =>
@@ -101,9 +104,9 @@ public partial class MainWindow
         });
     }
 
-    private async void OnSubscriptionSelected(object? sender, ListViewItemEventArgs e)
+    private async void OnSubscriptionSelected(object? sender, ValueChangedEventArgs<int?> e)
     {
-        await LoadVaultsForSubscriptionAsync(e.Item);
+        await LoadVaultsForSubscriptionAsync(e.NewValue ?? -1);
     }
 
     private async Task LoadVaultsForSubscriptionAsync(int index)
@@ -151,13 +154,13 @@ public partial class MainWindow
                     // Add KeyVaults with [KV] prefix
                     foreach (var v in _keyVaults)
                     {
-                        _vaultsSource.Add($"[KV] {EscapeHotkey(v.Name)}", Color.BrightCyan);
+                        _vaultsSource.Add($"[KV] {EscapeHotkey(v.Name)}", ColorName16.BrightCyan);
                     }
                     
                     // Add ContainerApps with [CA] prefix
                     foreach (var a in _containerApps)
                     {
-                        _vaultsSource.Add($"[CA] {EscapeHotkey(a.Name)}", Color.BrightGreen);
+                        _vaultsSource.Add($"[CA] {EscapeHotkey(a.Name)}", ColorName16.BrightGreen);
                     }
                     
                     SetStatus($"Found {_keyVaults.Count} key vaults + {_containerApps.Count} container apps (cached)");
@@ -190,13 +193,13 @@ public partial class MainWindow
                 // Add KeyVaults with [KV] prefix
                 foreach (var v in _keyVaults)
                 {
-                    _vaultsSource.Add($"[KV] {EscapeHotkey(v.Name)}", Color.BrightCyan);
+                    _vaultsSource.Add($"[KV] {EscapeHotkey(v.Name)}", ColorName16.BrightCyan);
                 }
                 
                 // Add ContainerApps with [CA] prefix
                 foreach (var a in _containerApps)
                 {
-                    _vaultsSource.Add($"[CA] {EscapeHotkey(a.Name)}", Color.BrightGreen);
+                    _vaultsSource.Add($"[CA] {EscapeHotkey(a.Name)}", ColorName16.BrightGreen);
                 }
                 
                 SetStatus($"Found {_keyVaults.Count} key vaults + {_containerApps.Count} container apps");
@@ -244,43 +247,44 @@ public partial class MainWindow
             // Add KeyVaults with [KV] prefix
             foreach (var v in _keyVaults)
             {
-                _vaultsSource.Add($"[KV] {EscapeHotkey(v.Name)}", Color.BrightCyan);
+                _vaultsSource.Add($"[KV] {EscapeHotkey(v.Name)}", ColorName16.BrightCyan);
             }
             
             // Add ContainerApps with [CA] prefix
             foreach (var a in _containerApps)
             {
-                _vaultsSource.Add($"[CA] {EscapeHotkey(a.Name)}", Color.BrightGreen);
+                _vaultsSource.Add($"[CA] {EscapeHotkey(a.Name)}", ColorName16.BrightGreen);
             }
             
             SetStatus($"Found {_keyVaults.Count} key vaults + {_containerApps.Count} container apps across {subscriptions.Count} subscriptions");
         });
     }
 
-    private async void OnVaultSelected(object? sender, ListViewItemEventArgs e)
+    private async void OnVaultSelected(object? sender, ValueChangedEventArgs<int?> e)
     {
-        if (e.Item < 0)
+        var itemIndex = e.NewValue ?? -1;
+        if (itemIndex < 0)
         {
             return;
         }
-        
+
         // Calculate which resource type was selected based on index
         int totalResources = _keyVaults.Count + _containerApps.Count;
-        if (e.Item >= totalResources)
+        if (itemIndex >= totalResources)
         {
             return;
         }
-        
+
         // Determine if this is a KeyVault or ContainerApp
-        bool isKeyVault = e.Item < _keyVaults.Count;
-        
+        bool isKeyVault = itemIndex < _keyVaults.Count;
+
         if (isKeyVault)
         {
-            await LoadKeyVaultSecretsAsync(e.Item);
+            await LoadKeyVaultSecretsAsync(itemIndex);
         }
         else
         {
-            await LoadContainerAppSecretsAsync(e.Item);
+            await LoadContainerAppSecretsAsync(itemIndex);
         }
     }
 
@@ -303,13 +307,11 @@ public partial class MainWindow
                     _secretsSource.Clear();
                     ClearSecretDetails();
                     _filteredSecrets = [.. _secrets];
+                    // FilterSecrets() selects the first row itself (via SelectSecretAt, which forces a
+                    // Details refresh even if the ListView's index is unchanged from before this vault
+                    // switch) - no need to redundantly set SelectedItem here too.
                     FilterSecrets();
                     SetStatus($"Found {_secrets.Count} secrets (cached)");
-                    
-                    if (_filteredSecrets.Count > 0)
-                    {
-                        _secretsList.SelectedItem = 0;
-                    }
                 }
             });
             return;
@@ -321,7 +323,7 @@ public partial class MainWindow
             _secretsSource.Clear();
             ClearSecretDetails();
         });
-        
+
         SetStatus($"Loading secrets from {vault.Name}...");
 
         if (!string.IsNullOrEmpty(vault.SubscriptionId) && _selectedSubscription != null)
@@ -339,7 +341,7 @@ public partial class MainWindow
                 _secretsLoading.Visible = false;
                 _filteredSecrets = [.. _secrets];
                 FilterSecrets();
-                
+
                 if (error != null)
                 {
                     SetStatus($"⚠ Failed to load secrets");
@@ -352,10 +354,6 @@ public partial class MainWindow
                 else
                 {
                     SetStatus($"Found {_secrets.Count} secrets");
-                    if (_filteredSecrets.Count > 0)
-                    {
-                        _secretsList.SelectedItem = 0;
-                    }
                 }
             }
             else
@@ -390,13 +388,11 @@ public partial class MainWindow
                     _secretsSource.Clear();
                     ClearSecretDetails();
                     _filteredContainerAppSecrets = [.. _containerAppSecrets];
+                    // FilterSecretsContainerApp() selects the first row itself (via SelectContainerAppSecretAt,
+                    // which forces a Details refresh even if the ListView's index is unchanged from before this
+                    // switch) - no need to redundantly set SelectedItem here too.
                     FilterSecretsContainerApp();
                     SetStatus($"Found {_containerAppSecrets.Count} secrets (cached) - Note: Container Apps don't expose secret values");
-                    
-                    if (_filteredContainerAppSecrets.Count > 0)
-                    {
-                        _secretsList.SelectedItem = 0;
-                    }
                 }
             });
             return;
@@ -439,10 +435,6 @@ public partial class MainWindow
                 else
                 {
                     SetStatus($"Found {_containerAppSecrets.Count} secrets - Note: Container Apps don't expose secret values");
-                    if (_filteredContainerAppSecrets.Count > 0)
-                    {
-                        _secretsList.SelectedItem = 0;
-                    }
                 }
             }
             else
@@ -452,47 +444,69 @@ public partial class MainWindow
         });
     }
 
-    private async void OnSecretSelected(object? sender, ListViewItemEventArgs e)
+    private async void OnSecretSelected(object? sender, ValueChangedEventArgs<int?> e)
     {
+        var itemIndex = e.NewValue ?? -1;
+
         // Determine which resource type we're dealing with based on what's selected
         if (_selectedVault != null)
         {
-            if (e.Item < 0 || e.Item >= _filteredSecrets.Count)
-            {
-                return;
-            }
-            
-            _selectedSecret = _filteredSecrets[e.Item];
-            _selectedContainerAppSecret = null;
-            
-            // Check if we have cached value
-            _currentSecretValue = _resourcesClient.GetCachedSecretValue(_selectedVault.Name, _selectedSecret.Name);
-            UpdateSecretDetails();
-            
-            // Auto-load value if not cached
-            if (_currentSecretValue == null)
-            {
-                await RevealSecretAsync();
-            }
+            await ApplyKeyVaultSecretSelectionAsync(itemIndex);
         }
         else if (_selectedContainerApp != null)
         {
-            if (e.Item < 0 || e.Item >= _filteredContainerAppSecrets.Count)
-            {
-                return;
-            }
-            
-            var secret = _filteredContainerAppSecrets[e.Item];
-            
-            // Check if we have cached value
-            var cachedValue = _resourcesClient.GetCachedContainerAppSecretValue(_selectedContainerApp.Name, secret.Name);
-            _selectedContainerAppSecret = cachedValue != null ? secret with { Value = cachedValue } : secret;
-            _selectedSecret = null;
-            UpdateSecretDetailsContainerApp();
+            ApplyContainerAppSecretSelection(itemIndex);
         }
     }
 
-    private async void OnSecretEntered(object? sender, ListViewItemEventArgs e)
+    /// <summary>
+    /// Updates <see cref="_selectedSecret"/> and the Details panel for the Key Vault secret at the given
+    /// filtered-list index, auto-loading its value if not already cached. Shared by the ListView's
+    /// ValueChanged event and by <see cref="SelectSecretAt"/>'s same-index refresh path.
+    /// </summary>
+    private async Task ApplyKeyVaultSecretSelectionAsync(int itemIndex)
+    {
+        if (itemIndex < 0 || itemIndex >= _filteredSecrets.Count || _selectedVault == null)
+        {
+            return;
+        }
+
+        _selectedSecret = _filteredSecrets[itemIndex];
+        _selectedContainerAppSecret = null;
+
+        // Check if we have cached value
+        _currentSecretValue = _resourcesClient.GetCachedSecretValue(_selectedVault.Name, _selectedSecret.Name);
+        UpdateSecretDetails();
+
+        // Auto-load value if not cached
+        if (_currentSecretValue == null)
+        {
+            await RevealSecretAsync();
+        }
+    }
+
+    /// <summary>
+    /// Updates <see cref="_selectedContainerAppSecret"/> and the Details panel for the Container App secret
+    /// at the given filtered-list index. Shared by the ListView's ValueChanged event and by
+    /// <see cref="SelectContainerAppSecretAt"/>'s same-index refresh path.
+    /// </summary>
+    private void ApplyContainerAppSecretSelection(int itemIndex)
+    {
+        if (itemIndex < 0 || itemIndex >= _filteredContainerAppSecrets.Count || _selectedContainerApp == null)
+        {
+            return;
+        }
+
+        var secret = _filteredContainerAppSecrets[itemIndex];
+
+        // Check if we have cached value
+        var cachedValue = _resourcesClient.GetCachedContainerAppSecretValue(_selectedContainerApp.Name, secret.Name);
+        _selectedContainerAppSecret = cachedValue != null ? secret with { Value = cachedValue } : secret;
+        _selectedSecret = null;
+        UpdateSecretDetailsContainerApp();
+    }
+
+    private async void OnSecretEntered(object? sender, CommandEventArgs e)
     {
         await RevealSecretAsync();
     }
